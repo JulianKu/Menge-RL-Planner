@@ -1,9 +1,11 @@
+#!/usr/bin/env python3
+
 from setuptools import setup
+from catkin_pkg.python_setup import generate_distutils_setup
 
-
-setup(
-    name='crowdnav',
-    version='0.0.1',
+setup_args = generate_distutils_setup(
+    version='0.1.0',
+    name='rl_planner',
     packages=[
         'crowd_nav',
         'crowd_nav.configs',
@@ -14,6 +16,12 @@ setup(
         'crowd_sim.envs.policy',
         'crowd_sim.envs.utils',
     ],
+    package_dir={'': 'src'},
+    author='Julian Kunze',
+    author_email='julian-kunze@gmx.de',
+)
+
+setup(
     install_requires=[
         'gitpython',
         'gym',
@@ -32,4 +40,10 @@ setup(
             'pytest',
         ],
     },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
+    **setup_args
 )
