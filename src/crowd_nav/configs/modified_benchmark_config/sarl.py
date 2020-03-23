@@ -1,4 +1,4 @@
-from crowd_nav.configs.icra_benchmark.config import BaseEnvConfig, BasePolicyConfig, BaseTrainConfig, Config
+from crowd_nav.configs.modified_benchmark_config.config import BaseEnvConfig, BasePolicyConfig, BaseTrainConfig, Config
 
 
 class EnvConfig(BaseEnvConfig):
@@ -9,14 +9,7 @@ class EnvConfig(BaseEnvConfig):
 class PolicyConfig(BasePolicyConfig):
     def __init__(self, debug=False):
         super(PolicyConfig, self).__init__(debug)
-        self.name = 'gcn'
-
-        # gcn
-        self.gcn.num_layer = 2
-        self.gcn.X_dim = 32
-        self.gcn.similarity_function = 'embedded_gaussian'
-        self.gcn.layerwise_graph = False
-        self.gcn.skip_connection = True
+        self.name = 'sarl'
 
 
 class TrainConfig(BaseTrainConfig):

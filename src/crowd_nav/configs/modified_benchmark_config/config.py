@@ -18,23 +18,20 @@ class BaseEnvConfig(object):
     env.val_size = 100
     env.test_size = 500
     env.train_size = np.iinfo(np.uint32).max - 2000
-    env.randomize_attributes = False
-    env.robot_sensor_range = 5
 
     reward = Config()
     reward.success_reward = 1
-    reward.collision_penalty = -0.25
+    reward.collision_penalty_crowd = -0.25
     reward.discomfort_dist = 0.2
     reward.discomfort_penalty_factor = 0.5
+    reward.collision_penalty_obs = -0.25
+    reward.clearance_dist = 0.2
+    reward.clearance_dist_penalty_factor = 0.5
 
     sim = Config()
-    sim.train_val_scenario = 'circle_crossing'
-    sim.test_scenario = 'circle_crossing'
-    sim.square_width = 20
-    sim.circle_radius = 4
-    sim.human_num = 5
-    sim.nonstop_human = False
-    sim.centralized_planning = True
+    sim.scenario = '/home/julian/Desktop/test_data/test.xml'
+    sim.human_num = 30
+    sim.randomize_attributes = True
 
     humans = Config()
     humans.visible = True
@@ -44,11 +41,24 @@ class BaseEnvConfig(object):
     humans.sensor = 'coordinates'
 
     robot = Config()
-    robot.visible = False
+    robot.visible = True
     robot.policy = 'none'
     robot.radius = 0.3
     robot.v_pref = 1
-    robot.sensor = 'coordinates'
+    robot.sensor_range = 50
+    robot.fov = 1.7174  # field of view (FOV) in rad
+    robot.sensor_resolution = 0.0017453  # in rad
+    robot.rotation_constraint = np.pi / 3
+
+    robot.action_space = Config()
+    robot.action_space.kinematics = 'holonomic'
+    robot.action_space.speed_samples = 5
+    robot.action_space.rotation_samples = 16
+    robot.action_space.speed_sampling = 'exponential'
+    robot.action_space.rotation_sampling = 'linear'
+
+    ros = Config()
+    ros.rate = 10
 
     def __init__(self, debug=False):
         if debug:
