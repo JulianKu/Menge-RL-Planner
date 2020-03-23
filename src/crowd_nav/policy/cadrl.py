@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import itertools
 import logging
-from crowd_sim.envs.policy.policy import Policy
+from crowd_nav.policy.policy import Policy
 from crowd_sim.envs.utils.action import ActionRot, ActionXY
 from crowd_sim.envs.utils.state import ObservableState, FullState
 

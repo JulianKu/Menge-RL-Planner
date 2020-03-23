@@ -1,6 +1,6 @@
 import numpy as np
 import rvo2
-from crowd_sim.envs.policy.policy import Policy
+from crowd_nav.policy.policy import Policy
 from crowd_sim.envs.utils.action import ActionXY
 
 

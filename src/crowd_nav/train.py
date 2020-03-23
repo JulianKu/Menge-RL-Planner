@@ -8,9 +8,8 @@ import torch
 import gym
 import copy
 import git
-import re
 from tensorboardX import SummaryWriter
-from crowd_sim.envs.utils.robot import Robot
+from crowd_nav.utils.robot import Robot
 from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer
 from crowd_nav.utils.memory import ReplayMemory
 from crowd_nav.utils.explorer import Explorer
