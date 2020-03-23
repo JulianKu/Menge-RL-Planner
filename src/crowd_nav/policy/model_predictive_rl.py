@@ -30,6 +30,7 @@ class ModelPredictiveRL(Policy):
         self.action_values = None
         self.robot_state_dim = 9
         self.human_state_dim = 5
+        self.static_obs_dim = 2
         self.v_pref = 1
         self.share_graph_model = None
         self.value_estimator = None
@@ -56,19 +57,20 @@ class ModelPredictiveRL(Policy):
 
         if self.linear_state_predictor:
             self.state_predictor = LinearStatePredictor(config, self.time_step)
-            graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
+            graph_model = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
             self.value_estimator = ValueEstimator(config, graph_model)
             self.model = [graph_model, self.value_estimator.value_network]
         else:
             if self.share_graph_model:
-                graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
+                graph_model = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
                 self.value_estimator = ValueEstimator(config, graph_model)
                 self.state_predictor = StatePredictor(config, graph_model, self.time_step)
-                self.model = [graph_model, self.value_estimator.value_network, self.state_predictor.human_motion_predictor]
+                self.model = [graph_model, self.value_estimator.value_network,
+                              self.state_predictor.human_motion_predictor]
             else:
-                graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim)
+                graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
                 self.value_estimator = ValueEstimator(config, graph_model1)
-                graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim)
+                graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
                 self.state_predictor = StatePredictor(config, graph_model2, self.time_step)
                 self.model = [graph_model1, graph_model2, self.value_estimator.value_network,
                               self.state_predictor.human_motion_predictor]

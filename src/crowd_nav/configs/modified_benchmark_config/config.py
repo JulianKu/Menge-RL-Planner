@@ -114,8 +114,10 @@ class BasePolicyConfig(object):
     gcn.multiagent_training = True
     gcn.num_layer = 2
     gcn.X_dim = 32
+    gcn.O_dim = 32  # TODO: probably reduce target dimensions (i.e. X_dim) here, because to much from 2 (x,y) to 32
     gcn.wr_dims = [64, gcn.X_dim]
     gcn.wh_dims = [64, gcn.X_dim]
+    gcn.ws_dims = [64, gcn.O_dim]
     gcn.final_state_dim = gcn.X_dim
     gcn.gcn2_w1_dim = gcn.X_dim
     gcn.planning_dims = [150, 100, 100, 1]
