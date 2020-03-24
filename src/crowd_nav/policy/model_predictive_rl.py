@@ -2,13 +2,13 @@ import logging
 import torch
 import numpy as np
 from numpy.linalg import norm
+from typing import Tuple
 from crowd_nav.policy.policy import Policy
 from crowd_nav.utils.utils import point_to_segment_dist
-from crowd_sim.envs.utils.state import tensor_to_joint_state
-from crowd_sim.envs.utils.utils import point_to_segment_dist
 from crowd_nav.policy.state_predictor import StatePredictor, LinearStatePredictor
 from crowd_nav.policy.graph_model import RGL
 from crowd_nav.policy.value_estimator import ValueEstimator
+from menge_gym.envs.utils.state import tensor_to_joint_state
 
 
 class ModelPredictiveRL(Policy):
@@ -359,15 +359,12 @@ class ModelPredictiveRL(Policy):
 
         return reward
 
-    def transform(self, state):
+    def transform(self, state) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Take the JointState to tensors
 
-        :param state:
-        :return: tensor of shape (# of agent, len(state))
+        :param state: JointState(robot_state, human_states, obstacles)
+        :return: Tuple of tensors (robot_state_tensor, human_states_tensor, obstacle_tensor)
         """
-        robot_state_tensor = torch.Tensor([state.robot_state.to_tuple()]).to(self.device)
-        human_states_tensor = torch.Tensor([human_state.to_tuple() for human_state in state.human_states]). \
-            to(self.device)
 
-        return robot_state_tensor, human_states_tensor
+        return state.to_tensor(device=self.device)

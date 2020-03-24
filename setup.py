@@ -32,7 +32,8 @@ setup(
         'torchvision',
         'seaborn',
         'tqdm',
-        'tensorboardX'
+        'tensorboardX',
+        'menge_gym'
     ],
     extras_require={
         'test': [
