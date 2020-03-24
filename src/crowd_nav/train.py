@@ -82,6 +82,10 @@ def main(args):
     logging.info('Using device: %s', device)
     writer = SummaryWriter(log_dir=args.output_dir)
 
+    # configure environment
+    env_config = config.EnvConfig(args.debug)
+    env = gym.make("menge_gym:MengeGym-v0")
+    env.configure(env_config)
     # configure policy
     policy_config = config.PolicyConfig()
     policy = policy_factory[policy_config.name]()
@@ -90,10 +94,6 @@ def main(args):
     policy.configure(policy_config)
     policy.set_device(device)
 
-    # configure environment
-    env_config = config.EnvConfig(args.debug)
-    env = gym.make('CrowdSim-v0')
-    env.configure(env_config)
     robot = Robot(env_config, 'robot')
     robot.time_step = env.time_step
     env.set_robot(robot)
