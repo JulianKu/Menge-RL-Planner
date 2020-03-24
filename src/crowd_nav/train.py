@@ -96,7 +96,8 @@ def main(args):
     policy = policy_factory[policy_config.name]()
     if not policy.trainable:
         parser.error('Policy has to be trainable')
-    policy.configure(policy_config)
+    policy_action_space = (env.action_space, env.action_array)
+    policy.configure(policy_config, env.config, policy_action_space)
     policy.set_device(device)
 
     # read training parameters
@@ -119,7 +120,8 @@ def main(args):
     batch_size = train_config.trainer.batch_size
     optimizer = train_config.trainer.optimizer
     if policy_config.name == 'model_predictive_rl':
-        trainer = MPRLTrainer(model, policy.state_predictor, memory, device, policy, writer, batch_size, optimizer, env.human_num,
+        trainer = MPRLTrainer(model, policy.state_predictor, memory, device, policy, writer, batch_size, optimizer,
+                              env.human_num,
                               reduce_sp_update_frequency=train_config.train.reduce_sp_update_frequency,
                               freeze_state_predictor=train_config.train.freeze_state_predictor,
                               detach_state_predictor=train_config.train.detach_state_predictor,
@@ -232,7 +234,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument('--policy', type=str, default='model_predictive_rl')
-    parser.add_argument('--config', type=str, default='configs/icra_benchmark/mp_separate.py')
+    parser.add_argument('--config', type=str, default='configs/modified_benchmark_config/mp_separate.py')
     parser.add_argument('--output_dir', type=str, default='data/output')
     parser.add_argument('--overwrite', default=False, action='store_true')
     parser.add_argument('--weights', type=str)

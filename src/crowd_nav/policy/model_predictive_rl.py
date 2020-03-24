@@ -20,18 +20,22 @@ class ModelPredictiveRL(Policy):
         self.kinematics = None
         self.epsilon = None
         self.gamma = None
-        self.sampling = None
+        self.speed_sampling = None
+        self.rotation_sampling = None
         self.speed_samples = None
         self.rotation_samples = None
         self.action_space = None
+        self.action_indices = None
+        self.action_array = None
         self.rotation_constraint = None
         self.speeds = None
         self.rotations = None
         self.action_values = None
-        self.robot_state_dim = 9
-        self.human_state_dim = 5
+        self.robot_state_dim = 11
+        self.human_state_dim = 7
         self.static_obs_dim = 2
         self.v_pref = 1
+        self.reward = None
         self.share_graph_model = None
         self.value_estimator = None
         self.linear_state_predictor = None
@@ -45,8 +49,15 @@ class ModelPredictiveRL(Policy):
         self.action_group_index = []
         self.traj = None
 
-    def configure(self, config):
-        self.set_common_parameters(config)
+    def configure(self, config, env_config=None, action_space=(None, None)):
+
+        if hasattr(env_config, "robot_v_pref"):
+            self.v_pref = env_config.robot_v_pref
+        self.action_space, self.action_array = action_space
+        self.action_indices = np.array(np.meshgrid(np.arange(self.action_space.nvec[0]),
+                                                   np.arange(self.action_space.nvec[1]))).T.reshape(-1, 2)
+
+        self.set_common_parameters(config, env_config)
         self.planning_depth = config.model_predictive_rl.planning_depth
         self.do_action_clip = config.model_predictive_rl.do_action_clip
         if hasattr(config.model_predictive_rl, 'sparse_search'):
@@ -82,13 +93,33 @@ class ModelPredictiveRL(Policy):
         if self.planning_depth > 1 and not self.do_action_clip:
             logging.warning('Performing d-step planning without action space clipping!')
 
-    def set_common_parameters(self, config):
+    def set_common_parameters(self, config, env_config=None):
         self.gamma = config.rl.gamma
-        self.kinematics = config.action_space.kinematics
-        self.sampling = config.action_space.sampling
-        self.speed_samples = config.action_space.speed_samples
-        self.rotation_samples = config.action_space.rotation_samples
-        self.rotation_constraint = config.action_space.rotation_constraint
+        if hasattr(env_config, "robot_kinematics"):
+            self.kinematics = env_config.robot_kinematics
+        else:
+            self.kinematics = config.action_space.kinematics
+        if hasattr(env_config, "robot_speed_sampling"):
+            self.speed_sampling = env_config.robot_speed_sampling
+        else:
+            self.speed_sampling = config.action_space.speed_sampling
+        if hasattr(env_config, "robot_rotation_sampling"):
+            self.rotation_sampling = env_config.robot_rotation_sampling
+        else:
+            self.rotation_sampling = config.action_space.rotation_sampling
+        if hasattr(env_config, "num_speeds"):
+            self.speed_samples = env_config.num_speeds
+        else:
+            self.speed_samples = config.action_space.speed_samples
+        if hasattr(env_config, "num_angles"):
+            self.rotation_samples = env_config.num_angles
+        else:
+            self.rotation_samples = config.action_space.rotation_samples
+        if hasattr(env_config, "rotation_constraint"):
+            self.rotation_constraint = env_config.rotation_constraint
+        else:
+            self.rotation_constraint = config.action_space.rotation_constraint
+        self.reward = config.rewards
 
     def set_device(self, device):
         self.device = device
