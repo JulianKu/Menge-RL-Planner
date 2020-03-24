@@ -86,6 +86,11 @@ def main(args):
     env_config = config.EnvConfig(args.debug)
     env = gym.make("menge_gym:MengeGym-v0")
     env.configure(env_config)
+    # robot = Robot(env_config, 'robot')
+    # robot.time_step = env.time_step
+    robot = Robot(env_config, 'robot')
+    robot.time_step = env.config.time_step
+
     # configure policy
     policy_config = config.PolicyConfig()
     policy = policy_factory[policy_config.name]()
@@ -93,10 +98,6 @@ def main(args):
         parser.error('Policy has to be trainable')
     policy.configure(policy_config)
     policy.set_device(device)
-
-    robot = Robot(env_config, 'robot')
-    robot.time_step = env.time_step
-    env.set_robot(robot)
 
     # read training parameters
     train_config = config.TrainConfig(args.debug)
@@ -126,7 +127,6 @@ def main(args):
     else:
         trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
     explorer = Explorer(env, robot, device, writer, memory, policy.gamma, target_policy=policy)
-
     # imitation learning
     if args.resume:
         if not os.path.exists(rl_weight_file):
@@ -143,10 +143,11 @@ def main(args):
         il_epochs = train_config.imitation_learning.il_epochs
         il_learning_rate = train_config.imitation_learning.il_learning_rate
         trainer.set_learning_rate(il_learning_rate)
-        if robot.visible:
+        if env.robot_visibility:
             safety_space = 0
         else:
-            safety_space = train_config.imitation_learning.safety_space
+            raise NotImplementedError('Invisible Robot not implemented for Menge Sim')
+            #safety_space = train_config.imitation_learning.safety_space
         il_policy = policy_factory[il_policy]()
         il_policy.multiagent_training = policy.multiagent_training
         il_policy.safety_space = safety_space
@@ -162,7 +163,6 @@ def main(args):
     # reinforcement learning
     policy.set_env(env)
     robot.set_policy(policy)
-    robot.print_info()
     trainer.set_learning_rate(rl_learning_rate)
     # fill the memory pool with some RL experience
     if args.resume:

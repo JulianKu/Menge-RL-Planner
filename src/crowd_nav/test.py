@@ -82,7 +82,6 @@ def main(args):
         env.test_scenario = args.test_scenario
 
     robot = Robot(env_config, 'robot')
-    env.set_robot(robot)
     robot.time_step = env.time_step
     robot.set_policy(policy)
     explorer = Explorer(env, robot, device, None, gamma=0.9)
@@ -96,19 +95,20 @@ def main(args):
     policy.set_device(device)
     # set safety space for ORCA in non-cooperative simulation
     if isinstance(robot.policy, ORCA):
-        if robot.visible:
+        if env.robot_visibility:
             robot.policy.safety_space = args.safety_space
         else:
             robot.policy.safety_space = args.safety_space
         logging.info('ORCA agent buffer: %f', robot.policy.safety_space)
 
     policy.set_env(env)
-    robot.print_info()
 
     if args.visualize:
         rewards = []
         ob = env.reset(args.phase, args.test_case)
         done = False
+        # TODO:
+        #  Replace robot here with env action
         last_pos = np.array(robot.get_position())
         while not done:
             action = robot.act(ob)
