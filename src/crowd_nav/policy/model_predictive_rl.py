@@ -308,52 +308,66 @@ class ModelPredictiveRL(Policy):
         """ If the time step is small enough, it's okay to model agent as linear movement during this period
 
         """
-        # collision detection
         if isinstance(state, list) or isinstance(state, tuple):
             state = tensor_to_joint_state(state)
         human_states = state.human_states
         robot_state = state.robot_state
+        obstacles = state.obstacles
 
-        dmin = float('inf')
-        collision = False
-        for i, human in enumerate(human_states):
-            px = human.px - robot_state.px
-            py = human.py - robot_state.py
-            if self.kinematics == 'holonomic':
-                vx = human.vx - action.vx
-                vy = human.vy - action.vy
-            else:
-                vx = human.vx - action.v * np.cos(action.r + robot_state.theta)
-                vy = human.vy - action.v * np.sin(action.r + robot_state.theta)
-            ex = px + vx * self.time_step
-            ey = py + vy * self.time_step
-            # closest distance between boundaries of two agents
-            closest_dist = point_to_segment_dist(px, py, ex, ey, 0, 0) - human.radius - robot_state.radius
-            if closest_dist < 0:
-                collision = True
-                break
-            elif closest_dist < dmin:
-                dmin = closest_dist
+        # collision detection with other pedestrians
+
+        # difference vector (distance) between robot and human (for all humans) at initial position
+        d_0 = human_states.position - robot_state.position
+
+        # compute robot velocity vector
+        new_angle = robot_state.angle + action[1]
+        if self.kinematics == 'holonomic':
+            vx = action[0] * np.cos(new_angle)
+            vy = action[0] * np.sin(new_angle)
+        else:
+            raise NotImplementedError("nonholonomic motion model not implemented yet")
+        robot_velocity = np.array([vx, vy]).reshape(1, 2)
+
+        # velocity difference between robot and human (for all humans)
+        d_velocity = human_states.velocity - robot_velocity
+
+        # difference vector (distance) between robot and human (for all humans) at advanced position
+        d_1 = d_0 + d_velocity * self.time_step
+
+        # linear interpolation between d_0 and d_1 gives all differences (distances)
+        # between initial and advanced position
+        # --> point on this line that is closest to origin (0, 0) yields minimal distance
+        origin = np.array([0, 0])
+
+        # vectorized distance formula for point and line segment
+        d_min2human = point_to_segment_dist(d_0, d_1, origin) - human_states.radius - robot_state.radius
+        d_min2human = np.min(d_min2human)
+
+        # collision detection with obstacles
+        if self.kinematics == 'holonomic':
+            end_position = robot_state.position + robot_velocity * self.time_step
+        else:
+            raise NotImplementedError("nonholonomic motion model not implemented yet")
+        d_min2obs = point_to_segment_dist(robot_state.position, end_position, obstacles.position) - robot_state.radius
+        d_min2obs = np.min(d_min2obs)
 
         # check if reaching the goal
-        if self.kinematics == 'holonomic':
-            px = robot_state.px + action.vx * self.time_step
-            py = robot_state.py + action.vy * self.time_step
-        else:
-            theta = robot_state.theta + action.r
-            px = robot_state.px + np.cos(theta) * action.v * self.time_step
-            py = robot_state.py + np.sin(theta) * action.v * self.time_step
+        reaching_goal = norm(end_position - robot_state.goal_position) < robot_state.radius + robot_state.goal_radius
 
-        end_position = np.array((px, py))
-        reaching_goal = norm(end_position - np.array([robot_state.gx, robot_state.gy])) < robot_state.radius
-
-        if collision:
-            reward = -0.25
+        if d_min2human < 0:
+            # collision with other human
+            reward = self.reward.collision_penalty_crowd
+        elif d_min2obs < 0:
+            # collision with obstacle
+            reward = self.reward.collision_penalty_obs
         elif reaching_goal:
-            reward = 1
-        elif dmin < 0.2:
+            reward = self.reward.success_reward
+        elif d_min2human < self.reward.discomfort_dist:
             # adjust the reward based on FPS
-            reward = (dmin - 0.2) * 0.5 * self.time_step
+            reward = (d_min2human - self.reward.discomfort_dist) * self.reward.discomfort_penalty_factor \
+                     * self.time_step
+        elif d_min2obs < self.reward.clearance_dist:
+            reward = (d_min2obs - self.reward.clearance_dist) * self.reward.clearance_penalty_factor * self.time_step
         else:
             reward = 0
 
