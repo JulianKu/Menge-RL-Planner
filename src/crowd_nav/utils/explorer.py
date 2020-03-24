@@ -46,7 +46,8 @@ class Explorer(object):
             actions = []
             rewards = []
             while not done:
-                action = self.robot.act(ob)
+                # TODO: check if can work with only "ob" instead of "JointState(robot.get_full_state(), ob)"
+                action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
                 states.append(self.robot.policy.last_state)
                 actions.append(action)
@@ -75,11 +76,11 @@ class Explorer(object):
                     # only add positive(success) or negative(collision) experience in experience set
                     self.update_memory(states, actions, rewards, imitation_learning)
 
-            cumulative_rewards.append(sum([pow(self.gamma, t * self.robot.time_step * self.robot.v_pref)
+            cumulative_rewards.append(sum([pow(self.gamma, t * self.robot.time_step * self.env.robot_v_pref)
                                            * reward for t, reward in enumerate(rewards)]))
             returns = []
             for step in range(len(rewards)):
-                step_return = sum([pow(self.gamma, t * self.robot.time_step * self.robot.v_pref)
+                step_return = sum([pow(self.gamma, t * self.robot.time_step * self.env.robot_v_pref)
                                    * reward for t, reward in enumerate(rewards[step:])])
                 returns.append(step_return)
             average_returns.append(average(returns))
@@ -122,7 +123,7 @@ class Explorer(object):
                 # define the value of states in IL as cumulative discounted rewards, which is the same in RL
                 state = self.target_policy.transform(state)
                 next_state = self.target_policy.transform(states[i+1])
-                value = sum([pow(self.gamma, (t - i) * self.robot.time_step * self.robot.v_pref) * reward *
+                value = sum([pow(self.gamma, (t - i) * self.robot.time_step * self.env.robot_v_pref) * reward *
                              (1 if t >= i else 0) for t, reward in enumerate(rewards)])
             else:
                 next_state = states[i+1]
