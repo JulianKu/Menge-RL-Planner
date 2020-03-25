@@ -135,7 +135,7 @@ class Explorer(object):
     def update_memory(self, states, actions, rewards, imitation_learning=False):
         if self.memory is None or self.gamma is None:
             raise ValueError('Memory or gamma value is not set!')
-        
+
         for i, state in enumerate(states[:-1]):
             reward = rewards[i]
 
@@ -143,11 +143,11 @@ class Explorer(object):
             if imitation_learning:
                 # define the value of states in IL as cumulative discounted rewards, which is the same in RL
                 state = self.target_policy.transform(state)
-                next_state = self.target_policy.transform(states[i+1])
+                next_state = self.target_policy.transform(states[i + 1])
                 value = sum([pow(self.gamma, (t - i) * self.robot.time_step * self.env.robot_v_pref) * reward *
                              (1 if t >= i else 0) for t, reward in enumerate(rewards)])
             else:
-                next_state = states[i+1]
+                next_state = states[i + 1]
                 if i == len(states) - 1:
                     # terminal state
                     value = reward
@@ -157,7 +157,8 @@ class Explorer(object):
             reward = torch.Tensor([rewards[i]]).to(self.device)
 
             if self.target_policy.name == 'ModelPredictiveRL':
-                self.memory.push((state[0], state[1], value, reward, next_state[0], next_state[1]))
+                self.memory.push((state[0], state[1], state[2], value, reward,
+                                  next_state[0], next_state[1], next_state[2]))
             else:
                 self.memory.push((state, value, reward, next_state))
 

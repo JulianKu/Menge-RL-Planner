@@ -116,14 +116,16 @@ class MPRLTrainer(object):
         s_losses = 0
         batch_count = 0
         for data in self.data_loader:
-            robot_states, human_states, _, rewards, next_robot_states, next_human_states = data
-
+            robot_states, human_states, obstacles, _, rewards, next_robot_states, next_human_states, next_obstacles \
+                = data
+            joint_state = (robot_states, human_states, obstacles)
+            joint_next_state = (next_robot_states, next_human_states, next_obstacles)
             # optimize value estimator
             self.v_optimizer.zero_grad()
-            outputs = self.value_estimator((robot_states, human_states))
+            outputs = self.value_estimator(joint_state)
 
             gamma_bar = pow(self.gamma, self.time_step * self.v_pref)
-            target_values = rewards + gamma_bar * self.target_model((next_robot_states, next_human_states))
+            target_values = rewards + gamma_bar * self.target_model(joint_next_state)
 
             # values = values.to(self.device)
             loss = self.criterion(outputs, target_values)
@@ -141,7 +143,7 @@ class MPRLTrainer(object):
 
                 if update_state_predictor:
                     self.s_optimizer.zero_grad()
-                    _, next_human_states_est = self.state_predictor((robot_states, human_states), None,
+                    _, next_human_states_est = self.state_predictor(joint_state, None,
                                                                     detach=self.detach_state_predictor)
                     loss = self.criterion(next_human_states_est, next_human_states)
                     loss.backward()
