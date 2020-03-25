@@ -1,8 +1,29 @@
 import numpy as np
 import rvo2
 from crowd_nav.policy.policy import Policy
-from crowd_sim.envs.utils.action import ActionXY
 
+
+def obstacles2segments(obstacles, d_min=0.1):
+    """
+    connects consecutive obstacle points close to each other (distance <= d_min) to obstacle segments.
+    """
+    dist = np.linalg.norm(obstacles.position[:-1] - obstacles.position[1:], axis=1)
+    # new segment begins where distance between two consecutive obstacle positions becomes to large (> d_min)
+    mask = dist > d_min
+    obstacle_segments = []
+    segments = []
+    seg_count = 0
+    # create array that tells which segment an obstacle belongs to
+    for new_segment in mask:
+        obstacle_segments.append(seg_count)
+        seg_count += 1 if new_segment else 0
+    obstacle_segments.append(seg_count)
+    obstacle_segments = np.array(obstacle_segments)
+    # merge all obstacle positions from same segment into single obstacle
+    for segment_idx in np.unique(obstacle_segments):
+        obstacle_segment = obstacles.position[np.where(obstacle_segments == segment_idx)[0]]
+        segments.append(list(map(tuple, obstacle_segment)))
+    return segments
 
 class ORCA(Policy):
     def __init__(self):
@@ -64,10 +85,15 @@ class ORCA(Policy):
         self.time_horizon_obst = 5
         self.radius = 0.3
         self.max_speed = 1
+        self.action_space = None
+        self.action_array = None
+        self.action_indices = None
         self.sim = None
 
-    def configure(self, config):
-        return
+    def configure(self, config, env_config=None, action_space=(None, None)):
+        self.action_space, self.action_array = action_space
+        self.action_indices = np.array(np.meshgrid(np.arange(self.action_space.nvec[0]),
+                                                   np.arange(self.action_space.nvec[1]))).T.reshape(-1, 2)
 
     def set_phase(self, phase):
         return
@@ -83,27 +109,37 @@ class ORCA(Policy):
         :param state:
         :return:
         """
-        robot_state = state.robot_state
+        robot_state, human_states, obstacles = state
+
         params = self.neighbor_dist, self.max_neighbors, self.time_horizon, self.time_horizon_obst
         if self.sim is not None and self.sim.getNumAgents() != len(state.human_states) + 1:
             del self.sim
             self.sim = None
+        # required to turn individual obstacle points into line segments to being able to process them
+        segments = obstacles2segments(obstacles)
         if self.sim is None:
-            self.sim = rvo2.PyRVOSimulator(self.time_step, *params, self.radius, self.max_speed)
-            self.sim.addAgent(robot_state.position, *params, robot_state.radius + 0.01 + self.safety_space,
-                              robot_state.v_pref, robot_state.velocity)
-            for human_state in state.human_states:
-                self.sim.addAgent(human_state.position, *params, human_state.radius + 0.01 + self.safety_space,
-                                  self.max_speed, human_state.velocity)
+            self.sim = rvo2.PyRVOSimulator(self.time_step, *params, radius=self.radius, max_speed=self.max_speed)
+            self.sim.addAgent(robot_state.position, *params, radius=robot_state.radius + 0.01 + self.safety_space,
+                              max_speed=robot_state.v_pref, velocity=robot_state.velocity)
+            for i, human_position in enumerate(human_states.position):
+                self.sim.addAgent(human_position, *params, radius=human_states.radius[i] + 0.01 + self.safety_space,
+                                  max_speed=self.max_speed, velocity=human_states.velocity[i])
+
         else:
             self.sim.setAgentPosition(0, robot_state.position)
             self.sim.setAgentVelocity(0, robot_state.velocity)
-            for i, human_state in enumerate(state.human_states):
-                self.sim.setAgentPosition(i + 1, human_state.position)
-                self.sim.setAgentVelocity(i + 1, human_state.velocity)
+            for i, human_position in enumerate(human_states.position):
+                self.sim.setAgentPosition(i + 1, human_position)
+                self.sim.setAgentVelocity(i + 1, human_states.velocity[i])
+            self.sim.clearObstacles()
+            for segment in segments:
+                if len(segment) > 1:
+                    self.sim.addObstacle(segment)
+
+        self.sim.processObstacles()
 
         # Set the preferred velocity to be a vector of unit magnitude (speed) in the direction of the goal.
-        velocity = np.array((robot_state.gx - robot_state.px, robot_state.gy - robot_state.py))
+        velocity = robot_state.goal_position - robot_state.position
         speed = np.linalg.norm(velocity)
         pref_vel = velocity / speed if speed > 1 else velocity
 
@@ -114,46 +150,19 @@ class ORCA(Policy):
         # pref_vel += perturb_vel
 
         self.sim.setAgentPrefVelocity(0, tuple(pref_vel))
-        for i, human_state in enumerate(state.human_states):
+        for i, human_position in enumerate(human_states.position):
             # unknown goal position of other humans
             self.sim.setAgentPrefVelocity(i + 1, (0, 0))
 
         self.sim.doStep()
-        action = ActionXY(*self.sim.getAgentVelocity(0))
+        target_velocity = self.sim.getAgentVelocity(0)
+        target_velocity_magnitude = np.linalg.norm(target_velocity)
+        target_angle = np.arctan2(target_velocity[1], target_velocity[0])
+        rel_target_angle = target_angle - robot_state.angle[0]
+        # find action in action space that is closest
+        dist_action_space = np.linalg.norm(self.action_array - np.array([target_velocity_magnitude, rel_target_angle]),
+                                           axis=2)
+        closest_action = np.unravel_index(np.argmin(dist_action_space), dist_action_space.shape)
         self.last_state = state
 
-        return action
-
-
-class CentralizedORCA(ORCA):
-    def __init__(self):
-        super().__init__()
-
-    def predict(self, state):
-        """ Centralized planning for all agents """
-        params = self.neighbor_dist, self.max_neighbors, self.time_horizon, self.time_horizon_obst
-        if self.sim is not None and self.sim.getNumAgents() != len(state):
-            del self.sim
-            self.sim = None
-
-        if self.sim is None:
-            self.sim = rvo2.PyRVOSimulator(self.time_step, *params, self.radius, self.max_speed)
-            for agent_state in state:
-                self.sim.addAgent(agent_state.position, *params, agent_state.radius + 0.01 + self.safety_space,
-                                  self.max_speed, agent_state.velocity)
-        else:
-            for i, agent_state in enumerate(state):
-                self.sim.setAgentPosition(i, agent_state.position)
-                self.sim.setAgentVelocity(i, agent_state.velocity)
-
-        # Set the preferred velocity to be a vector of unit magnitude (speed) in the direction of the goal.
-        for i, agent_state in enumerate(state):
-            velocity = np.array((agent_state.gx - agent_state.px, agent_state.gy - agent_state.py))
-            speed = np.linalg.norm(velocity)
-            pref_vel = velocity / speed if speed > 1 else velocity
-            self.sim.setAgentPrefVelocity(i, (pref_vel[0], pref_vel[1]))
-
-        self.sim.doStep()
-        actions = [ActionXY(*self.sim.getAgentVelocity(i)) for i in range(len(state))]
-
-        return actions
+        return closest_action
