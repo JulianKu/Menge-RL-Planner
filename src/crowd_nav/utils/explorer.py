@@ -3,7 +3,8 @@ import logging
 import copy
 import torch
 from tqdm import tqdm
-from crowd_sim.envs.utils.info import *
+from collections import Counter
+from menge_gym.envs.utils.info import *
 
 
 class Explorer(object):
@@ -28,10 +29,13 @@ class Explorer(object):
         collision = 0
         timeout = 0
         discomfort = 0
-        min_dist = []
+        clearance = 0
+        comfort_min_dist = []
+        clearance_min_dist = []
         cumulative_rewards = []
         average_returns = []
         collision_cases = []
+        collision_types = []
         timeout_cases = []
 
         if k != 1:
@@ -55,7 +59,11 @@ class Explorer(object):
 
                 if isinstance(info, Discomfort):
                     discomfort += 1
-                    min_dist.append(info.min_dist)
+                    comfort_min_dist.append(info.min_dist)
+
+                if isinstance(info, Clearance):
+                    clearance += 1
+                    clearance_min_dist.append(info.min_dist)
 
             if isinstance(info, ReachGoal):
                 success += 1
@@ -63,6 +71,7 @@ class Explorer(object):
             elif isinstance(info, Collision):
                 collision += 1
                 collision_cases.append(i)
+                collision_types.append(info.partner)
                 collision_times.append(self.env.global_time)
             elif isinstance(info, Timeout):
                 timeout += 1
@@ -90,24 +99,36 @@ class Explorer(object):
         success_rate = success / k
         collision_rate = collision / k
         assert success + collision + timeout == k
+
+        collision_types = Counter(collision_types)
+        collision_type_rates = {col_type: collision_types[col_type] * collision_rate / sum(collision_types.values())
+                                for col_type in collision_types}
+
         avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.time_limit
 
         extra_info = '' if episode is None else 'in episode {} '.format(episode)
         extra_info = extra_info + '' if epoch is None else extra_info + ' in epoch {} '.format(epoch)
-        logging.info('{:<5} {}has success rate: {:.2f}, collision rate: {:.2f}, nav time: {:.2f}, total reward: {:.4f},'
-                     ' average return: {:.4f}'. format(phase.upper(), extra_info, success_rate, collision_rate,
-                                                       avg_nav_time, average(cumulative_rewards),
-                                                       average(average_returns)))
+        logging.info('{:<5} {}has success rate: {:.2f}, collision rate: {:.2f} (crowd: {:.2f}, obstacles: {:.2f}), '
+                     'nav time: {:.2f}, total reward: {:.4f}, average return: {:.4f}'
+                     .format(phase.upper(), extra_info, success_rate, collision_rate,
+                             collision_type_rates['Crowd'], collision_type_rates['Obstacle'],
+                             avg_nav_time, average(cumulative_rewards), average(average_returns)))
         if phase in ['val', 'test']:
             total_time = sum(success_times + collision_times + timeout_times)
-            logging.info('Frequency of being in danger: %.2f and average min separate distance in danger: %.2f',
-                         discomfort / total_time, average(min_dist))
+            discomfort_rate = discomfort / total_time
+            clearance_rate = clearance / total_time
+            logging.info('Frequency of being too close to other bodies: {:.2f} (crowd: {:.2f}, obstacle: {:.2f}) and '
+                         'average min separation distance (when too close): {:.2f} (crowd: {:.2f}, obstacle: {:.2f})'
+                         .format(discomfort_rate + clearance_rate, discomfort_rate, clearance_rate,
+                                 average(comfort_min_dist + clearance_min_dist), average(comfort_min_dist),
+                                 average(clearance_min_dist)))
 
         if print_failure:
             logging.info('Collision cases: ' + ' '.join([str(x) for x in collision_cases]))
             logging.info('Timeout cases: ' + ' '.join([str(x) for x in timeout_cases]))
-
-        self.statistics = success_rate, collision_rate, avg_nav_time, average(cumulative_rewards), average(average_returns)
+        collision_type_rates.update({'Total': collision_rate})
+        self.statistics = success_rate, collision_type_rates, avg_nav_time, average(cumulative_rewards), \
+                          average(average_returns)
 
         return self.statistics
 
@@ -141,9 +162,9 @@ class Explorer(object):
                 self.memory.push((state, value, reward, next_state))
 
     def log(self, tag_prefix, global_step):
-        sr, cr, time, reward, avg_return = self.statistics
+        sr, crs, time, reward, avg_return = self.statistics
         self.writer.add_scalar(tag_prefix + '/success_rate', sr, global_step)
-        self.writer.add_scalar(tag_prefix + '/collision_rate', cr, global_step)
+        self.writer.add_scalars(tag_prefix + '/collision_rate', crs, global_step)
         self.writer.add_scalar(tag_prefix + '/time', time, global_step)
         self.writer.add_scalar(tag_prefix + '/reward', reward, global_step)
         self.writer.add_scalar(tag_prefix + '/avg_return', avg_return, global_step)
