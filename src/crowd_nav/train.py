@@ -86,8 +86,6 @@ def main(args):
     env_config = config.EnvConfig(args.debug)
     env = gym.make("menge_gym:MengeGym-v0")
     env.configure(env_config)
-    # robot = Robot(env_config, 'robot')
-    # robot.time_step = env.time_step
     robot = Robot(env_config, 'robot')
     robot.time_step = env.config.time_step
 
@@ -149,7 +147,7 @@ def main(args):
             safety_space = 0
         else:
             raise NotImplementedError('Invisible Robot not implemented for Menge Sim')
-            #safety_space = train_config.imitation_learning.safety_space
+            # safety_space = train_config.imitation_learning.safety_space
         il_policy = policy_factory[il_policy]()
         il_policy.multiagent_training = policy.multiagent_training
         il_policy.safety_space = safety_space
