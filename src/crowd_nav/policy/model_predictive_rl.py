@@ -237,6 +237,7 @@ class ModelPredictiveRL(Policy):
         else:
             self.traj = max_traj
 
+        # TODO: check that max_action is np.array([idx_velocity, idx_angle]) for action_space
         return max_action
 
     def action_clip(self, state, action_indices, action_array, width, depth=1):
@@ -380,5 +381,7 @@ class ModelPredictiveRL(Policy):
         :param state: JointState(robot_state, human_states, obstacles)
         :return: Tuple of tensors (robot_state_tensor, human_states_tensor, obstacle_tensor)
         """
-
-        return state.to_tensor(device=self.device)
+        if isinstance(state, tuple):
+            return state
+        else:
+            return state.to_tensor(device=self.device)
