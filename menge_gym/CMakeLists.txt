@@ -10,7 +10,7 @@ project(menge_gym)
 find_package(catkin REQUIRED COMPONENTS
   rospy
   menge_srv
-  menge_scene_creation
+  menge_card_loader
   std_msgs
   geometry_msgs
   visualization_msgs
