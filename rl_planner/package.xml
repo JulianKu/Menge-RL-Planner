@@ -52,6 +52,7 @@
 <!--  <depend>pylaunch</depend>-->
 <!--  <depend>rosnode</depend>-->
   <depend>rospy</depend>
+  <depend>menge_gym</depend>
 <!--  <depend>roslaunch</depend>-->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-tensorboardX-pip</exec_depend>
