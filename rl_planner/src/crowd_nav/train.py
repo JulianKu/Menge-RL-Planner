@@ -120,7 +120,7 @@ def main(args):
     optimizer = train_config.trainer.optimizer
     if policy_config.name == 'model_predictive_rl':
         trainer = MPRLTrainer(model, policy.state_predictor, memory, device, policy, writer, batch_size, optimizer,
-                              env.human_num,
+                              env.config.human_num,
                               reduce_sp_update_frequency=train_config.train.reduce_sp_update_frequency,
                               freeze_state_predictor=train_config.train.freeze_state_predictor,
                               detach_state_predictor=train_config.train.detach_state_predictor,
@@ -144,7 +144,7 @@ def main(args):
         il_epochs = train_config.imitation_learning.il_epochs
         il_learning_rate = train_config.imitation_learning.il_learning_rate
         trainer.set_learning_rate(il_learning_rate)
-        if env.robot_visibility:
+        if env.config.robot_visibility:
             safety_space = 0
         else:
             raise NotImplementedError('Invisible Robot not implemented for Menge Sim')

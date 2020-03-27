@@ -119,7 +119,7 @@ class ModelPredictiveRL(Policy):
             self.rotation_constraint = env_config.rotation_constraint
         else:
             self.rotation_constraint = config.action_space.rotation_constraint
-        self.reward = config.rewards
+        self.reward = config.reward
 
     def set_device(self, device):
         self.device = device
