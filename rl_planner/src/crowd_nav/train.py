@@ -86,8 +86,6 @@ def main(args):
     env_config = config.EnvConfig(args.debug)
     env = gym.make("menge_gym:MengeGym-v0")
     env.configure(env_config)
-    robot = Robot(env_config, 'robot')
-    robot.time_step = env.config.time_step
 
     # configure policy
     policy_config = config.PolicyConfig()
@@ -97,6 +95,9 @@ def main(args):
     policy_action_space = (env.action_space, env.action_array)
     policy.configure(policy_config, env.config, policy_action_space)
     policy.set_device(device)
+
+    robot = Robot(env_config, 'robot')
+    robot.time_step = env.config.time_step
 
     # read training parameters
     train_config = config.TrainConfig(args.debug)
