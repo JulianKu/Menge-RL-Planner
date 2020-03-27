@@ -357,7 +357,6 @@ class MengeGym(gym.Env):
         self._step_done = msg.data
 
     def _cmd_vel_srv_handler(self, request):
-        # in menge_ros the published angle defines an angle increment
         if self._action is not None:
             cmd_vel_msg = Twist()
             cmd_vel_msg.linear.x = self._velocities[self._action[0]]  # vel_action
@@ -365,7 +364,8 @@ class MengeGym(gym.Env):
             cmd_vel_msg.linear.z = 0
             cmd_vel_msg.angular.x = 0
             cmd_vel_msg.angular.y = 0
-            cmd_vel_msg.angular.z = self._angles[self._action[1]]  # angle_action
+            # in menge_ros the published angle defines the absolute angle based on map coordinate system
+            cmd_vel_msg.angular.z = self.observation.robot_state.angle[0] + self._angles[self._action[1]]  # angle_action
             return CmdVelResponse(True, cmd_vel_msg)
         else:
             return CmdVelResponse(False, Twist())
