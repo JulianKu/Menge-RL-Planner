@@ -86,6 +86,8 @@ def main(args):
     env_config = config.EnvConfig(args.debug)
     env = gym.make("menge_gym:MengeGym-v0")
     env.configure(env_config)
+    if hasattr(env, 'roshandle'):
+        env.setup_ros_connection()
 
     # configure policy
     policy_config = config.PolicyConfig()
