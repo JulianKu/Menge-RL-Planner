@@ -90,7 +90,7 @@ class ORCA(Policy):
         self.action_indices = None
         self.sim = None
 
-    def configure(self, config, env_config=None, action_space=(None, None)):
+    def configure(self, action_space=(None, None)):
         self.action_space, self.action_array = action_space
         self.action_indices = np.array(np.meshgrid(np.arange(self.action_space.nvec[0]),
                                                    np.arange(self.action_space.nvec[1]))).T.reshape(-1, 2)
@@ -111,26 +111,38 @@ class ORCA(Policy):
         """
         robot_state, human_states, obstacles = state
 
-        params = self.neighbor_dist, self.max_neighbors, self.time_horizon, self.time_horizon_obst
+        params = {'neighborDist': self.neighbor_dist,
+                  'maxNeighbors': self.max_neighbors,
+                  'timeHorizon': self.time_horizon,
+                  'timeHorizonObst': self.time_horizon_obst}
         if self.sim is not None and self.sim.getNumAgents() != len(state.human_states) + 1:
             del self.sim
             self.sim = None
         # required to turn individual obstacle points into line segments to being able to process them
         segments = obstacles2segments(obstacles)
         if self.sim is None:
-            self.sim = rvo2.PyRVOSimulator(self.time_step, *params, radius=self.radius, max_speed=self.max_speed)
-            self.sim.addAgent(robot_state.position, *params, radius=robot_state.radius + 0.01 + self.safety_space,
-                              max_speed=robot_state.v_pref, velocity=robot_state.velocity)
+            self.sim = rvo2.PyRVOSimulator(timeStep=self.time_step,
+                                           radius=self.radius,
+                                           maxSpeed=self.max_speed,
+                                           **params)
+            self.sim.addAgent(tuple(*robot_state.position),
+                              radius=robot_state.radius[0] + 0.01 + self.safety_space,
+                              maxSpeed=robot_state.v_pref[0],
+                              velocity=tuple(*robot_state.velocity),
+                              **params)
             for i, human_position in enumerate(human_states.position):
-                self.sim.addAgent(human_position, *params, radius=human_states.radius[i] + 0.01 + self.safety_space,
-                                  max_speed=self.max_speed, velocity=human_states.velocity[i])
+                self.sim.addAgent(tuple(human_position),
+                                  radius=human_states.radius[i] + 0.01 + self.safety_space,
+                                  maxSpeed=self.max_speed,
+                                  velocity=tuple(human_states.velocity[i]),
+                                  **params)
 
         else:
-            self.sim.setAgentPosition(0, robot_state.position)
-            self.sim.setAgentVelocity(0, robot_state.velocity)
+            self.sim.setAgentPosition(0, tuple(*robot_state.position))
+            self.sim.setAgentVelocity(0, tuple(*robot_state.velocity))
             for i, human_position in enumerate(human_states.position):
-                self.sim.setAgentPosition(i + 1, human_position)
-                self.sim.setAgentVelocity(i + 1, human_states.velocity[i])
+                self.sim.setAgentPosition(i + 1, tuple(human_position))
+                self.sim.setAgentVelocity(i + 1, tuple(human_states.velocity[i]))
             self.sim.clearObstacles()
             for segment in segments:
                 if len(segment) > 1:
@@ -149,7 +161,7 @@ class ORCA(Policy):
         # perturb_vel = np.array((np.cos(perturb_angle), np.sin(perturb_angle))) * perturb_dist
         # pref_vel += perturb_vel
 
-        self.sim.setAgentPrefVelocity(0, tuple(pref_vel))
+        self.sim.setAgentPrefVelocity(0, tuple(*pref_vel))
         for i, human_position in enumerate(human_states.position):
             # unknown goal position of other humans
             self.sim.setAgentPrefVelocity(i + 1, (0, 0))
