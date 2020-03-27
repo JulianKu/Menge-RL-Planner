@@ -152,6 +152,7 @@ def main(args):
             raise NotImplementedError('Invisible Robot not implemented for Menge Sim')
             # safety_space = train_config.imitation_learning.safety_space
         il_policy = policy_factory[il_policy]()
+        il_policy.configure(policy_action_space)
         il_policy.multiagent_training = policy.multiagent_training
         il_policy.safety_space = safety_space
         robot.set_policy(il_policy)
