@@ -92,6 +92,13 @@ class JointState(object):
         self.human_states = human_states
         self.obstacles = obstacles
 
+        self.whole_state = (robot_state, human_states, obstacles)
+
+    def __getitem__(self, index):
+        if index < 3:
+            return self.whole_state[index]
+        raise IndexError('Joint state only has 3 items (robot_state, human_states and obstacles)')
+
     def to_tensor(self, add_batch_size=False, device=None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         robot_state_tensor = self.robot_state.to_tensor()
         human_states_tensor = self.human_states.to_tensor()
