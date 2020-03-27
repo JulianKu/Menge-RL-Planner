@@ -5,7 +5,7 @@ class Robot(object):
     def __init__(self, config, section):
         self.policy = policy_factory[getattr(config, section).policy]()
         self.time_step = None
-        self.kinematics = self.policy.kinematics
+        self.kinematics = self.policy.kinematics if self.policy is not None else None
 
     def set_policy(self, policy):
         if self.time_step is None:
