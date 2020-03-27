@@ -8,7 +8,7 @@ from time import sleep
 # import pylaunch as pl
 from rospy import loginfo, logdebug, logerr
 from signal import SIGTERM
-from numpy import arccos
+from numpy import arctan2
 from typing import Tuple, Dict
 
 
@@ -18,15 +18,17 @@ def pose2array(pose: Pose) -> Tuple[float, float, float]:
 
     :param pose: ROS geometry_msgs/Pose message
 
-    :return: list [x, y, omega] (2D position x,y + orientation omega)
+    :return: list [x, y, phi] (2D position x,y + orientation phi)
     """
     # only 2D poses (position x,y + rotation around z)
     x = pose.position.x
     y = pose.position.y
-    # orientation quaternion
-    omega = 2 * arccos(pose.orientation.w)
+    # orientation from quaternion
+    q_z = pose.orientation.z
+    q_w = pose.orientation.w
+    phi = arctan2(2 * q_w * q_z, 1 - 2 * q_z * q_z)
 
-    return x, y, omega
+    return x, y, phi
 
 
 def obstacle2array(obs_pose: Pose) -> Tuple[float, float]:
@@ -49,17 +51,19 @@ def marker2array(marker: Marker) -> Tuple[float, float, float, float]:
 
     :param marker: ROS visualization_msgs/Marker message
 
-    :return: list [x, y, q_w, q_z, r] (2D position x,y + orientation omega + radius r)
+    :return: list [x, y, q_w, q_z, r] (2D position x,y + orientation phi + radius r)
     """
     # only 2D poses (position x,y + rotation around z)
     x = marker.pose.position.x
     y = marker.pose.position.y
     # orientation quaternion
-    omega = 2 * arccos(marker.pose.orientation.w)
+    q_z = marker.pose.orientation.z
+    q_w = marker.pose.orientation.w
+    phi = arctan2(2 * q_w * q_z,  1 - 2 * q_z * q_z)
 
     # radius
     r = marker.scale.x / 2
-    return x, y, omega, r
+    return x, y, phi, r
 
 
 def start_roslaunch_file(pkg: str, launchfile: str, launch_cli_args: Dict[str, str] = None) -> subprocess.Popen:
