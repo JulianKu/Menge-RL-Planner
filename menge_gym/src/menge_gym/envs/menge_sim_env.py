@@ -468,12 +468,18 @@ class MengeGym(gym.Env):
         robot_radius = self.config.robot_radius
         goal = self.goal
 
-        crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
-        crowd_distances -= recent_crowd_pose[:, -1]
-        crowd_distances -= robot_radius
+        if np.any(recent_crowd_pose):
+            crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
+            crowd_distances -= recent_crowd_pose[:, -1]
+            crowd_distances -= robot_radius
+        else:
+            crowd_distances = np.array([])
 
-        obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
-        obstacle_distances -= robot_radius
+        if np.any(obstacle_position):
+            obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
+            obstacle_distances -= robot_radius
+        else:
+            obstacle_distances = np.array([])
 
         # compute distance to closest pedestrian
         if crowd_distances.size == 0:
