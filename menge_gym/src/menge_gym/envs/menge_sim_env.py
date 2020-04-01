@@ -6,6 +6,7 @@ import numpy as np
 from os import path
 import rospy as rp
 import rosnode
+import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
 from std_msgs.msg import Bool
@@ -98,13 +99,21 @@ class MengeGym(gym.Env):
         self.config.ros_rate = None
         self._rate = None
 
-    def configure(self, config):
+        # Random Seed
+        self.seed = None
+
+    def configure(self, config, seed=None):
 
         self.config = Config()
 
         # Environment
         self.config.time_limit = config.env.time_limit
         self.config.time_step = config.env.time_step
+
+        # Random Seed
+        if seed is not None:
+            np.random.seed(seed)
+            self.seed = seed
 
         # Simulation
         if hasattr(config.sim, 'scenario') and path.isfile(config.sim.scenario):
@@ -268,6 +277,11 @@ class MengeGym(gym.Env):
         behavior_root = parseXML(self.behavior_xml)
         goals = behavior_root.findall("GoalSet/Goal")
         self.goals_array = np.array([goal2array(goal) for goal in goals])
+
+        # set random seed for simulation and write to scenario xml
+        if self.seed is not None:
+            scenario_root.set("random", self.seed)
+            ElT.ElementTree(scenario_root).write(scenario_xml)
 
     def sample_goal(self, exclude_initial: bool = False):
         """

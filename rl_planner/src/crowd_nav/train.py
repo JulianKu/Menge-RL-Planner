@@ -85,7 +85,7 @@ def main(args):
     # configure environment
     env_config = config.EnvConfig(args.debug)
     env = gym.make("menge_gym:MengeGym-v0")
-    env.configure(env_config)
+    env.configure(env_config, args.randomseed)
     if hasattr(env, 'roshandle'):
         env.setup_ros_connection()
 
