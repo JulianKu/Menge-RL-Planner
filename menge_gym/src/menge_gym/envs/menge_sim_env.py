@@ -42,6 +42,7 @@ class MengeGym(gym.Env):
 
         # Simulation scenario variables
         self.config.scenario_xml = None
+        self.scenario_root = None
         self.scene_xml = None
         self.behavior_xml = None
         self.initial_robot_pos = None
@@ -110,11 +111,6 @@ class MengeGym(gym.Env):
         self.config.time_limit = config.env.time_limit
         self.config.time_step = config.env.time_step
 
-        # Random Seed
-        if seed is not None:
-            np.random.seed(seed)
-            self.seed = seed
-
         # Simulation
         if hasattr(config.sim, 'scenario') and path.isfile(config.sim.scenario):
             self.config.scenario_xml = config.sim.scenario
@@ -178,6 +174,10 @@ class MengeGym(gym.Env):
                 self.config.scenario_xml = img_parser.output['base']
         # get more parameters from scenario xml
         self._initialize_from_scenario()
+
+        # Random Seed
+        self.seed = seed
+        self._set_seed()
 
         # setup pedestrian tracker
         self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*self.config.robot_v_pref*self.config.time_step)
@@ -244,9 +244,9 @@ class MengeGym(gym.Env):
     def _initialize_from_scenario(self):
         scenario_xml = self.config.scenario_xml
         scenario_dir = path.split(scenario_xml)[0]
-        scenario_root = parseXML(scenario_xml)
+        self.scenario_root = parseXML(scenario_xml)
 
-        scene_xml = scenario_root.get('scene')
+        scene_xml = self.scenario_root.get('scene')
         if not path.isabs(scene_xml):
             self.scene_xml = path.join(scenario_dir, scene_xml)
         else:
@@ -268,7 +268,7 @@ class MengeGym(gym.Env):
             self.config.robot_v_pref = float(scene_root.find("AgentProfile[@name='{}']/Common"
                                                              .format(inherited_agt_profile)).get('pref_speed'))
 
-        behavior_xml = scenario_root.get('behavior')
+        behavior_xml = self.scenario_root.get('behavior')
         if not path.isabs(behavior_xml):
             self.behavior_xml = path.join(scenario_dir, behavior_xml)
         assert path.isfile(self.behavior_xml), 'Behavior file specified in scenario_xml non-existent'
@@ -278,10 +278,16 @@ class MengeGym(gym.Env):
         goals = behavior_root.findall("GoalSet/Goal")
         self.goals_array = np.array([goal2array(goal) for goal in goals])
 
-        # set random seed for simulation and write to scenario xml
+    def _set_seed(self):
+        """set random seed in numpy, for simulation and write to scenario xml"""
+
         if self.seed is not None:
-            scenario_root.set("random", self.seed)
-            ElT.ElementTree(scenario_root).write(scenario_xml)
+
+            np.random.seed(self.seed)
+
+            self.scenario_root.set("random", str(self.seed))
+            scenario_tree = ElT.ElementTree(self.scenario_root)
+            scenario_tree.write(self.config.scenario_xml, xml_declaration=True, encoding='utf-8', method="xml")
 
     def sample_goal(self, exclude_initial: bool = False):
         """
@@ -563,7 +569,7 @@ class MengeGym(gym.Env):
         if self.case_counter[phase] >= 0:
             new_seed = base_seed[phase] + self.case_counter[phase]
             np.random.seed(new_seed)
-            self.seed(new_seed)
+            self.seed = new_seed
             if phase == 'test':
                 rp.logdebug('current test seed is:{}'.format(new_seed))
             self.case_counter[phase] = (self.case_counter[phase] + 1) % self.case_size[phase]
