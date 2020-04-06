@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import logging
 import argparse
 import importlib.util
@@ -13,6 +15,9 @@ from crowd_nav.policy.orca import ORCA
 
 
 def main(args):
+    # set current working directory (cwd) to this script's location
+    os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
     # configure logging and device
     level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s, %(levelname)s: %(message)s',

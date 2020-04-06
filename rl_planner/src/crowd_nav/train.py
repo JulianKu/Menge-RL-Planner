@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 import logging
 import argparse
@@ -26,6 +28,9 @@ def set_random_seeds(seed):
 
 
 def main(args):
+    # set current working directory (cwd) to this script's location
+    os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
     set_random_seeds(args.randomseed)
     # configure paths
     make_new_dir = True

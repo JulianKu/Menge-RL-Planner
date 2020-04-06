@@ -101,12 +101,12 @@ catkin_python_setup()
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-#catkin_package(
-##  INCLUDE_DIRS include
-##  LIBRARIES rl_planner
-# CATKIN_DEPENDS # rosnode, pylaunch
-##  DEPENDS system_lib
-#)
+catkin_package(
+#  INCLUDE_DIRS include
+#  LIBRARIES rl_planner
+ CATKIN_DEPENDS rospy
+#  DEPENDS system_lib
+)
 
 ###########
 ## Build ##
@@ -157,14 +157,14 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-#install(
-#  PROGRAMS test/create_env
-#  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-#)
-#install(
-#  PROGRAMS src/envs/menge_sim_env.py
-#  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-#)
+install(
+  PROGRAMS src/crowd_nav/train.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+install(
+  PROGRAMS src/crowd_nav/test.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
