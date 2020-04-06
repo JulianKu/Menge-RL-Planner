@@ -320,20 +320,13 @@ class MengeGym(gym.Env):
         rp.on_shutdown(self.close)
 
         # simulation controls
-        rp.logdebug("Set up publishers and subscribers")
+        rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
         self._pub_run = rp.Publisher('run', Bool, queue_size=1)
         self._step_done = False
 
-        # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
-        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
-        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
-        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
-        rp.Subscriber("done", Bool, self._done_callback, queue_size=50)
-
         # self._cmd_vel_pub = rp.Publisher('/cmd_vel', Twist, queue_size=50)
         self._cmd_vel_srv = rp.Service('cmd_vel_srv', CmdVel, self._cmd_vel_srv_handler)
-        self._advance_sim_srv = rp.ServiceProxy('advance_simulation', RunSim)
 
         # initialize time
         self._rate = rp.Rate(self.config.ros_rate)
@@ -587,6 +580,14 @@ class MengeGym(gym.Env):
                     't': self.config.time_step}
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(5)
+
+        rp.logdebug("Set up subsribers and service proxies")
+        # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
+        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
+        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
+        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
+        rp.Subscriber("done", Bool, self._done_callback, queue_size=50)
+        self._advance_sim_srv = rp.ServiceProxy('advance_simulation', RunSim)
 
         # Sample new goal
         self.sample_goal(exclude_initial=True)
