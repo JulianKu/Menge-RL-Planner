@@ -450,18 +450,23 @@ class MengeGym(gym.Env):
         # wait for response from simulation, in the meantime publish cmd_vel
         counter = 0
         while not (self.global_time >= self._prev_time + n_steps * self.config.time_step) or not self._crowd_poses or not self._robot_poses:
+            # handle simulation reaching time limit
+            if self.global_time + self.config.time_step > self.config.time_limit:
+                break
+
             # rp.logdebug("Publishing cmd_vel message")
             # self._cmd_vel_pub.publish(vel_msg)
             rp.logdebug('Simulation not done yet')
-            rp.logdebug('Current Sim Time %f, previous sim time %f', (self.global_time, self._prev_time))
+            rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
             rp.logdebug('#Crowd %d, #Rob %d' %
                         (len(self._crowd_poses), len(self._robot_poses)))
             self._rate.sleep()
             counter += 1
             if counter >= 10:
                 raise TimeoutError("Simulator node not responding")
-        rp.logdebug('Simulation not done yet')
-        rp.logdebug('Current Sim Time %f, previous sim time %f', (self.global_time, self._prev_time))
+
+        rp.logdebug('Simulation step(s) done')
+        rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
         self._prev_time = self.global_time
         self._action = None
 
@@ -480,86 +485,90 @@ class MengeGym(gym.Env):
             reward, done, info
         """
 
-        # crowd_pose = [x, y, omega, r]
-        recent_crowd_pose = self._crowd_poses[-1]
 
-        # obstacle_position = [x, y]
-        obstacle_position = self._static_obstacles
-
-        # robot_pose = [x, y, omega]
-        recent_robot_pose = self._robot_poses[-1]
-
-        robot_radius = self.config.robot_radius
-        goal = self.goal
-
-        if np.any(recent_crowd_pose):
-            crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
-            crowd_distances -= recent_crowd_pose[:, -1]
-            crowd_distances -= robot_radius
-        else:
-            crowd_distances = np.array([])
-
-        if np.any(obstacle_position):
-            obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
-            obstacle_distances -= robot_radius
-        else:
-            obstacle_distances = np.array([])
-
-        # compute distance to closest pedestrian
-        if crowd_distances.size == 0:
-            # if no pedestrian, set to infinity
-            d_min_crowd = np.inf
-        else:
-            d_min_crowd = crowd_distances.min()
-
-        # compute distance to closest static obstacle
-        if obstacle_distances.size == 0:
-            # if no obstacles, set to infinity
-            d_min_obstacle = np.inf
-        else:
-            d_min_obstacle = obstacle_distances.min()
-
-        d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
-
-        # sim node terminated
-        if self.global_time >= self.config.time_limit:
+        if self.global_time + self.config.time_step > self.config.time_limit:
+            # handle reward, etc. for simulation reaching time limit
             reward = 0
             done = True
             info = Timeout()
-        # collision with crowd
-        elif d_min_crowd < 0:
-            reward = self.config.collision_penalty_crowd
-            done = True
-            info = Collision('Crowd')
-        # collision with obstacle
-        elif d_min_obstacle < 0:
-            reward = self.config.collision_penalty_obs
-            done = True
-            info = Collision('Obstacle')
-        # goal reached
-        elif d_goal < 0:
-            reward = self.config.success_reward
-            done = True
-            info = ReachGoal()
-        # too close to people
-        elif d_min_crowd < self.config.discomfort_dist:
-            # adjust the reward based on FPS
-            reward = (d_min_crowd - self.config.discomfort_dist) * self.config.discomfort_penalty_factor \
-                     * self.config.time_step
-            done = False
-            info = Discomfort(d_min_crowd)
-        # too close to obstacles
-        elif d_min_obstacle < self.config.clearance_dist:
-            # adjust the reward based on FPS
-            reward = (d_min_obstacle - self.config.clearance_dist) * self.config.clearance_penalty_factor \
-                     * self.config.time_step
-            done = False
-            info = Clearance(d_min_obstacle)
+            return reward, done, info
         else:
-            reward = 0
-            done = False
-            info = Nothing()
-        return reward, done, info
+            # crowd_pose = [x, y, omega, r]
+            recent_crowd_pose = self._crowd_poses[-1]
+
+            # obstacle_position = [x, y]
+            obstacle_position = self._static_obstacles
+
+            # robot_pose = [x, y, omega]
+            recent_robot_pose = self._robot_poses[-1]
+
+            robot_radius = self.config.robot_radius
+            goal = self.goal
+
+            if np.any(recent_crowd_pose):
+                crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
+                crowd_distances -= recent_crowd_pose[:, -1]
+                crowd_distances -= robot_radius
+            else:
+                crowd_distances = np.array([])
+
+            if np.any(obstacle_position):
+                obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
+                obstacle_distances -= robot_radius
+            else:
+                obstacle_distances = np.array([])
+
+            # compute distance to closest pedestrian
+            if crowd_distances.size == 0:
+                # if no pedestrian, set to infinity
+                d_min_crowd = np.inf
+            else:
+                d_min_crowd = crowd_distances.min()
+
+            # compute distance to closest static obstacle
+            if obstacle_distances.size == 0:
+                # if no obstacles, set to infinity
+                d_min_obstacle = np.inf
+            else:
+                d_min_obstacle = obstacle_distances.min()
+
+            d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+
+
+            # collision with crowd
+            if d_min_crowd < 0:
+                reward = self.config.collision_penalty_crowd
+                done = True
+                info = Collision('Crowd')
+            # collision with obstacle
+            elif d_min_obstacle < 0:
+                reward = self.config.collision_penalty_obs
+                done = True
+                info = Collision('Obstacle')
+            # goal reached
+            elif d_goal < 0:
+                reward = self.config.success_reward
+                done = True
+                info = ReachGoal()
+            # too close to people
+            elif d_min_crowd < self.config.discomfort_dist:
+                # adjust the reward based on FPS
+                reward = (d_min_crowd - self.config.discomfort_dist) * self.config.discomfort_penalty_factor \
+                         * self.config.time_step
+                done = False
+                info = Discomfort(d_min_crowd)
+            # too close to obstacles
+            elif d_min_obstacle < self.config.clearance_dist:
+                # adjust the reward based on FPS
+                reward = (d_min_obstacle - self.config.clearance_dist) * self.config.clearance_penalty_factor \
+                         * self.config.time_step
+                done = False
+                info = Clearance(d_min_obstacle)
+            else:
+                reward = 0
+                done = False
+                info = Nothing()
+            return reward, done, info
 
     def reset(self, phase='test', test_case=None):
         """
