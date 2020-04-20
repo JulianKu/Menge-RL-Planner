@@ -72,7 +72,7 @@ class MengeGym(gym.Env):
         # Observation variables
         self._crowd_poses = []  # type: List[np.ndarray]
         self._robot_poses = []  # type: List[np.ndarray]
-        self._static_obstacles = np.array([], dtype=float)
+        self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
         self.rob_tracker = None
         self.ped_tracker = None
         self.observation = None
@@ -94,7 +94,7 @@ class MengeGym(gym.Env):
         self._sim_pid = None
         self._pub_run = None
         self.global_time = None
-        self._prev_time = -1
+        self._prev_time = None
         self._cmd_vel_srv = None
         self._advance_sim_srv = None
         self.config.ros_rate = None
@@ -396,6 +396,11 @@ class MengeGym(gym.Env):
 
         reward, done, info = self._get_reward_done_info()
 
+        if isinstance(info, Timeout) and not (self._robot_poses and self._crowd_poses):
+            # in Timeout cases, crowd_poses and robot_poses might be missing
+            self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
+            self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
+
         # in first iteration, initialize Kalman Tracker for robot
         if not self.rob_tracker:
             self.rob_tracker = KalmanTracker(self._robot_poses[0])
@@ -407,7 +412,8 @@ class MengeGym(gym.Env):
             # state = np.concatenate((robot_pose[:, :3], crowd_pose[:, :3]), axis=0)
             ped_trackers = self.ped_tracker.update(crowd_pose)
             self.rob_tracker.predict()
-            self.rob_tracker.update(robot_pose)
+            if np.any(robot_pose):
+                self.rob_tracker.update(robot_pose)
         rob_tracker = self.rob_tracker.get_state()
         pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()][:, :-1])
         robot_state = FullState(np.concatenate((rob_tracker, self.robot_const_state), axis=1))
@@ -418,6 +424,7 @@ class MengeGym(gym.Env):
         # reset last poses
         self._crowd_poses = []
         self._robot_poses = []
+        self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
 
         return ob, reward, done, info
 
@@ -566,6 +573,7 @@ class MengeGym(gym.Env):
         if test_case is not None:
             self.case_counter[phase] = test_case
         self.global_time = 0.0
+        self._prev_time = -1
 
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
