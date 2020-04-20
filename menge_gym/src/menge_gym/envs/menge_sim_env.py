@@ -485,7 +485,6 @@ class MengeGym(gym.Env):
             reward, done, info
         """
 
-
         if self.global_time + self.config.time_step > self.config.time_limit:
             # handle reward, etc. for simulation reaching time limit
             reward = 0
@@ -533,7 +532,6 @@ class MengeGym(gym.Env):
                 d_min_obstacle = obstacle_distances.min()
 
             d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
-
 
             # collision with crowd
             if d_min_crowd < 0:
