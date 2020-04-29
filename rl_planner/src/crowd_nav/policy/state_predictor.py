@@ -24,13 +24,31 @@ class StatePredictor(nn.Module):
         """
 
         assert len(state[0].shape) == 3
-        assert len(state[1].shape) == 3
+
+        if isinstance(state[1], tuple):
+            # human_states contain mask and zero padded state batch
+            if isinstance(state[1][1], tuple):
+                # human_states also contain identifiers for each human
+                assert len(state[1][1][0].shape) == 3
+                human_identifiers = state[1][1][1]
+            else:
+                assert len(state[1][1].shape) == 3
+                human_identifiers = None
+        else:
+            assert len(state[1].shape) == 3
+            human_identifiers = None
         # state[2] = obstacles -> global position remains unchanged
-        assert len(state[2].shape) == 3
+        if isinstance(state[2], tuple):
+            # obstacles contain mask and zero padded state batch
+            assert len(state[2][1].shape) == 3
+        else:
+            assert len(state[2].shape) == 3
 
         state_embedding = self.graph_model(state)
         if detach:
             state_embedding = state_embedding.detach()
+            if human_identifiers is not None:
+                human_identifiers = human_identifiers.detach()
         if action is None:
             # for training purpose
             next_robot_state = None
@@ -38,7 +56,7 @@ class StatePredictor(nn.Module):
             next_robot_state = self.compute_next_state(state[0], action)
         next_human_states = self.human_motion_predictor(state_embedding)[:, 1:, :]
 
-        next_observation = [next_robot_state, next_human_states, state[2]]
+        next_observation = (next_robot_state, (next_human_states, human_identifiers), state[2])
         return next_observation
 
     def compute_next_state(self, robot_state, action):

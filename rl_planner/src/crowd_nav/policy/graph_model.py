@@ -136,6 +136,12 @@ class RGL(nn.Module):
 
         if isinstance(human_states, torch.Tensor):
             human_mask = 1
+        elif isinstance(human_states, tuple):
+            if isinstance(human_states[1], tuple):
+                (human_mask, (human_states, _)) = human_states
+            else:
+                human_states, _ = human_states
+                human_mask = 1
         else:
             raise NotImplementedError("human_states must be Tensor, tuple of Tensors (state, identifiers) "
                                       "or tuple of Tensor and tuple (mask, (state, identifiers))")

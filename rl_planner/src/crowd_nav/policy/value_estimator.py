@@ -14,10 +14,23 @@ class ValueEstimator(nn.Module):
 
         assert len(state[0].shape) == 3
 
-        assert len(state[1].shape) == 3
-        assert len(state[2].shape) == 3
+        if isinstance(state[1], tuple):
+            # human_states contain mask and zero padded state batch
+            if isinstance(state[1][1], tuple):
+                # human_states also contain identifiers for each human
+                assert len(state[1][1][0].shape) == 3
+            else:
+                assert len(state[1][0].shape) == 3
+        else:
+            assert len(state[1].shape) == 3
+        # state[2] = obstacles -> global position remains unchanged
+        if isinstance(state[2], tuple):
+            # obstacles contain mask and zero padded state batch
+            assert len(state[2][1].shape) == 3
+        else:
+            assert len(state[2].shape) == 3
 
-        # only use the feature of robot node as state representation
+        # only use the feature of robot node as state representation, disregarding identifiers
         state_embedding = self.graph_model(state)[:, 0, :]
         value = self.value_network(state_embedding)
         return value

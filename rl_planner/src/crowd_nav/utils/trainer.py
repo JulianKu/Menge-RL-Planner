@@ -97,12 +97,33 @@ class MPRLTrainer(object):
                     if update_state_predictor:
                         self.s_optimizer.zero_grad()
                         _, (next_human_states_est, next_human_identifiers_est), _ = self.state_predictor(joint_state,
-                        loss = self.criterion(next_human_states_est, next_human_states)
+                                                                                                         None)
                         next_human_mask, (next_human_states, next_human_identifiers) = next_human_states
+
+                        # if there is a mask, mask out padded values from predicted human state
                         human_mask = human_states[0] if isinstance(human_states, tuple) \
                                                         and isinstance(human_states[1], tuple) else 1
                         next_human_states_est = human_mask * next_human_states_est
 
+                        if next_human_identifiers is not None and next_human_identifiers_est is not None:
+                            # find matching indices between next_human_states and estimated next_human_states
+                            compareview_id = next_human_identifiers.expand(
+                                *next_human_identifiers.shape[:-1],
+                                next_human_identifiers_est.shape[1]).permute(0, 2, 1)
+                            identifier_mask = compareview_id == next_human_identifiers_est
+
+                            # mask out all identifiers that were padded in one of the two frames
+                            compareview_pad = next_human_mask.expand(*next_human_mask.shape[:-1],
+                                                                     human_mask.shape[1]).permute(0, 2, 1)
+                            pad_mask = (compareview_pad == 1) & (human_mask == 1)
+                            batch_idx, human_est_idx, human_idx = torch.where(identifier_mask & pad_mask)
+
+                            # compute loss only for humans that appear in two consecutive frames and are not masked out
+                            loss = self.criterion(next_human_states_est[batch_idx, human_est_idx],
+                                                  next_human_states[batch_idx, human_idx])
+                        else:
+                            loss = self.criterion(next_human_states_est,
+                                                  next_human_states)
                         loss.backward()
                         self.s_optimizer.step()
                         epoch_s_loss += loss.data.item()
@@ -162,6 +183,25 @@ class MPRLTrainer(object):
                     next_human_states_est = human_mask * next_human_states_est
 
 
+                    if next_human_identifiers is not None and next_human_identifiers_est is not None:
+                        # find matching indices between next_human_states and estimated next_human_states
+                        compareview_id = next_human_identifiers.expand(
+                            *next_human_identifiers.shape[:-1],
+                            next_human_identifiers_est.shape[1]).permute(0, 2, 1)
+                        identifier_mask = compareview_id == next_human_identifiers_est
+
+                        # mask out all identifiers that were padded in one of the two frames
+                        compareview_pad = next_human_mask.expand(*next_human_mask.shape[:-1],
+                                                                 human_mask.shape[1]).permute(0, 2, 1)
+                        pad_mask = (compareview_pad == 1) & (human_mask == 1)
+                        batch_idx, human_est_idx, human_idx = torch.where(identifier_mask & pad_mask)
+
+                        # compute loss only for humans that appear in two consecutive frames and are not masked out
+                        loss = self.criterion(next_human_states_est[batch_idx, human_est_idx],
+                                              next_human_states[batch_idx, human_idx])
+                    else:
+                        loss = self.criterion(next_human_states_est,
+                                              next_human_states)
                     loss.backward()
                     self.s_optimizer.step()
                     s_losses += loss.data.item()

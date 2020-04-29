@@ -415,7 +415,7 @@ class MengeGym(gym.Env):
             if np.any(robot_pose):
                 self.rob_tracker.update(robot_pose)
         rob_tracker = self.rob_tracker.get_state()
-        pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()][:, :-1])
+        pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()])
         robot_state = FullState(np.concatenate((rob_tracker, self.robot_const_state), axis=1))
         obstacle_state = ObstacleState(self._static_obstacles)
         self.observation = JointState(robot_state, pedestrian_state, obstacle_state)
@@ -608,7 +608,7 @@ class MengeGym(gym.Env):
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(5)
 
-        rp.logdebug("Set up subsribers and service proxies")
+        rp.logdebug("Set up subscribers and service proxies")
         # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
         rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
         rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
@@ -631,10 +631,11 @@ class MengeGym(gym.Env):
         states = self.observation  # type: JointState
         rob_state = states.robot_state.observable_state
         ped_states = states.human_states.state
+        ped_identifiers = states.human_states.get_identifiers()
         if len(rob_state) or len(ped_states):
             rp.loginfo('Tracked Objects')
             combined_state = np.concatenate((rob_state, ped_states), axis=0)
-            row_labels = ['human {}'.format(i+1) for i in range(len(ped_states))]
+            row_labels = ['human {}'.format(int(i)) for i in ped_identifiers]
             if len(rob_state):
                 row_labels.insert(0, 'robot')
             state_str = format_array(combined_state,
