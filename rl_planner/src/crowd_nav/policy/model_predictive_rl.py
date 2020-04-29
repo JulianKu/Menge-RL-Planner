@@ -227,7 +227,7 @@ class ModelPredictiveRL(Policy):
                 value = reward_est + self.get_normalized_gamma() * max_next_return
                 if value > max_value:
                     max_value = value
-                    max_action = action
+                    max_action = action_idx
                     max_traj = [(state_tensor, action, reward_est)] + max_next_traj
             if max_action is None:
                 raise ValueError('Value network is not well trained.')
