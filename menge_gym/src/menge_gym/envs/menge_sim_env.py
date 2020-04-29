@@ -449,7 +449,9 @@ class MengeGym(gym.Env):
         rp.logdebug("Service called")
         # wait for response from simulation, in the meantime publish cmd_vel
         counter = 0
-        while not (self.global_time >= self._prev_time + n_steps * self.config.time_step) or not self._crowd_poses or not self._robot_poses:
+        # while not (self.global_time >= self._prev_time + n_steps * self.config.time_step) \
+        #         and (not self._crowd_poses or not self._robot_poses):
+        while not self._crowd_poses or not self._robot_poses:
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
                 break
