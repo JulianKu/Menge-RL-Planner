@@ -1,5 +1,6 @@
 import numpy as np
 
+eps = np.finfo(float).eps
 
 def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     """
@@ -32,7 +33,8 @@ def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     bx = x - b
     # compute points on line through a and b that are closest to x
     # equivalent formula for single point and line: a + dot(ax, ab)/dot(ab, ab) * ab
-    closest_points = a + ((ax * ab).sum(-1) / (ab * ab).sum(-1)).reshape(-1, 1).repeat(2, axis=1) * ab
+    # stabilized by adding eps in denominator
+    closest_points = a + ((ax * ab).sum(-1) / (ab * ab + eps).sum(-1)).reshape(-1, 1).repeat(2, axis=1) * ab
 
     # determine whether closest_points lie on line segment
     ac = closest_points - a
