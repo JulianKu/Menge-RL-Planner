@@ -13,6 +13,7 @@ class ValueEstimator(nn.Module):
         """
 
         assert len(state[0].shape) == 3
+
         assert len(state[1].shape) == 3
         assert len(state[2].shape) == 3
 

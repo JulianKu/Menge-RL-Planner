@@ -381,7 +381,7 @@ class ModelPredictiveRL(Policy):
         :param state: JointState(robot_state, human_states, obstacles)
         :return: Tuple of tensors (robot_state_tensor, human_states_tensor, obstacle_tensor)
         """
-        if isinstance(state, tuple):
+        if (isinstance(state, tuple) and isinstance(state[0], torch.Tensor)) or isinstance(state, torch.Tensor):
             return state
         else:
             return state.to_tensor(device=self.device)
