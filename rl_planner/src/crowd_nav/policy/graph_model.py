@@ -131,6 +131,7 @@ class RGL(nn.Module):
         :param state:
         :return:
         """
+
         robot_state, human_states, static_obs = state
 
         # compute feature matrix X

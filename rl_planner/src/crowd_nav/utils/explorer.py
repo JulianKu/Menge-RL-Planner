@@ -107,7 +107,7 @@ class Explorer(object):
             if col_type not in collision_types:
                 collision_type_rates[col_type] = 0
 
-        avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.time_limit
+        avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.config.time_limit
 
         extra_info = '' if episode is None else 'in episode {} '.format(episode)
         extra_info = extra_info + '' if epoch is None else extra_info + ' in epoch {} '.format(epoch)

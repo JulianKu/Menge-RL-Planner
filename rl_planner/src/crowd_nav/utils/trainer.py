@@ -8,7 +8,8 @@ from torch.utils.data import DataLoader
 
 
 class MPRLTrainer(object):
-    def __init__(self, value_estimator, state_predictor, memory, device, policy, writer, batch_size, optimizer_str, human_num,
+    def __init__(self, value_estimator, state_predictor, memory, device, policy, writer, batch_size, optimizer_str,
+                 human_num,
                  reduce_sp_update_frequency, freeze_state_predictor, detach_state_predictor, share_graph_model):
         """
         Train the trainable model of a policy
@@ -73,11 +74,14 @@ class MPRLTrainer(object):
 
             update_counter = 0
             for data in self.data_loader:
-                robot_states, human_states, values, _, _, next_human_states = data
+                robot_states, human_states, obstacles, values, _, _, next_human_states, _ \
+                    = data
+                joint_state = (robot_states, human_states, obstacles)
 
                 # optimize value estimator
                 self.v_optimizer.zero_grad()
-                outputs = self.value_estimator((robot_states, human_states))
+
+                outputs = self.value_estimator(joint_state)
                 values = values.to(self.device)
                 loss = self.criterion(outputs, values)
                 loss.backward()
