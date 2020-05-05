@@ -55,3 +55,23 @@ def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     d_min[mask] = dist_c[mask]
 
     return d_min
+
+
+def mahalanobis_dist_nd(x: np.ndarray, y: np.ndarray):
+    """
+    compute the mahalanobis distance between two nd arrays where the last dimension gives the data dimensionality
+    :param x: first array, shape (..., d)
+    :param y: second array, shape (..., d)
+    :return: mahalanobis distance between x and y
+    """
+
+    assert x.shape[-1] == y.shape[-1], "Last dimension has to be the same for both arrays"
+
+    xx = x.reshape(-1, x.shape[-1])
+    yy = y.reshape(-1, y.shape[-1])
+    delta = xx - yy
+    inv = np.linalg.inv(np.cov(np.vstack([xx, yy]).T)).T
+    return_shape = x.shape[:-1] if len(x.shape) >= len(y.shape) else y.shape[:-1]
+
+    return np.sqrt(np.einsum('nj,jk,nk->n', delta, inv, delta)).reshape(return_shape)
+

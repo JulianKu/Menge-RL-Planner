@@ -1,6 +1,7 @@
 import numpy as np
 import rvo2
 from crowd_nav.policy.policy import Policy
+from crowd_nav.utils.utils import mahalanobis_dist_nd
 from menge_gym.envs.utils.motion_model import ModifiedAckermannModel
 from typing import Union
 
@@ -215,8 +216,7 @@ class ORCA(Policy):
             raise NotImplementedError("Only holonomic and single track model are implemented already")
 
         # find action in action space that is closest
-        dist_action_space = np.linalg.norm(self.action_array - np.array([target_velocity_magnitude, rel_target_angle]),
-                                           axis=2)
+        dist_action_space = mahalanobis_dist_nd(self.action_array, action)
         closest_action = np.unravel_index(np.argmin(dist_action_space), dist_action_space.shape)
         self.last_state = state
 
