@@ -1,6 +1,8 @@
 import numpy as np
 import rvo2
 from crowd_nav.policy.policy import Policy
+from menge_gym.envs.utils.motion_model import ModifiedAckermannModel
+from typing import Union
 
 
 def obstacles2segments(obstacles, d_min=0.1):
@@ -24,6 +26,7 @@ def obstacles2segments(obstacles, d_min=0.1):
         obstacle_segment = obstacles.position[np.where(obstacle_segments == segment_idx)[0]]
         segments.append(list(map(tuple, obstacle_segment)))
     return segments
+
 
 class ORCA(Policy):
     def __init__(self):
@@ -77,7 +80,8 @@ class ORCA(Policy):
         self.name = 'ORCA'
         self.trainable = False
         self.multiagent_training = True
-        self.kinematics = 'holonomic'
+        self.kinematics = None
+        self.motion_model = None  # type: Union[ModifiedAckermannModel, None]
         self.safety_space = 0
         self.neighbor_dist = 10
         self.max_neighbors = 10
@@ -90,10 +94,38 @@ class ORCA(Policy):
         self.action_indices = None
         self.sim = None
 
-    def configure(self, action_space=(None, None)):
+    def configure(self, config, env_config=None, action_space=(None, None)):
         self.action_space, self.action_array = action_space
         self.action_indices = np.array(np.meshgrid(np.arange(self.action_space.nvec[0]),
                                                    np.arange(self.action_space.nvec[1]))).T.reshape(-1, 2)
+
+        if hasattr(env_config, "robot_kinematics"):
+            self.kinematics = env_config.robot_kinematics
+        else:
+            self.kinematics = config.robot.action_space.kinematics
+
+        if hasattr(env_config, "robot_length"):
+            robot_length = env_config.robot_length
+        elif hasattr(config.robot, "length"):
+            robot_length = config.robot.length
+        else:
+            if self.kinematics == "single_track":
+                raise ValueError("lf_ratio required in config for single_track motion_model")
+            else:
+                robot_length = None
+
+        if hasattr(env_config, "robot_lf_ratio"):
+            robot_lf_ratio = env_config.robot_lf_ratio
+        elif hasattr(config.robot, "lf_ratio"):
+            robot_lf_ratio = config.robot.lf_ratio
+        else:
+            if self.kinematics == "single_track":
+                raise ValueError("lf_ratio required in config for single_track motion_model")
+            else:
+                robot_lf_ratio = None
+
+        if self.kinematics == "single_track":
+            self.motion_model = ModifiedAckermannModel(robot_length, robot_lf_ratio)
 
     def set_phase(self, phase):
         return
@@ -167,10 +199,21 @@ class ORCA(Policy):
             self.sim.setAgentPrefVelocity(i + 1, (0, 0))
 
         self.sim.doStep()
+
         target_velocity = self.sim.getAgentVelocity(0)
-        target_velocity_magnitude = np.linalg.norm(target_velocity)
-        target_angle = np.arctan2(target_velocity[1], target_velocity[0])
-        rel_target_angle = target_angle - robot_state.angle[0]
+
+        if self.kinematics == "holonomic":
+            target_velocity_magnitude = np.linalg.norm(target_velocity)
+            target_angle = np.arctan2(target_velocity[1], target_velocity[0])
+            rel_target_angle = target_angle - robot_state.orientation[0]
+            action = np.array([target_velocity_magnitude, rel_target_angle])
+
+        elif self.kinematics == "single_track":
+            self.motion_model.setPose(robot_state.position, robot_state.orientation[0])
+            action = self.motion_model.computeSteering(target_velocity)
+        else:
+            raise NotImplementedError("Only holonomic and single track model are implemented already")
+
         # find action in action space that is closest
         dist_action_space = np.linalg.norm(self.action_array - np.array([target_velocity_magnitude, rel_target_angle]),
                                            axis=2)

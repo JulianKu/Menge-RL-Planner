@@ -9,6 +9,7 @@ from crowd_nav.policy.state_predictor import StatePredictor, LinearStatePredicto
 from crowd_nav.policy.graph_model import RGL
 from crowd_nav.policy.value_estimator import ValueEstimator
 from menge_gym.envs.utils.state import tensor_to_joint_state
+from menge_gym.envs.utils.motion_model import ModifiedAckermannModel
 
 
 class ModelPredictiveRL(Policy):
@@ -18,6 +19,7 @@ class ModelPredictiveRL(Policy):
         self.trainable = True
         self.multiagent_training = True
         self.kinematics = None
+        self.motion_model = None  # type: Union[ModifiedAckermannModel, None]
         self.epsilon = None
         self.gamma = None
         self.speed_sampling = None
@@ -86,6 +88,14 @@ class ModelPredictiveRL(Policy):
                 self.model = [graph_model1, graph_model2, self.value_estimator.value_network,
                               self.state_predictor.human_motion_predictor]
 
+
+        if isinstance(self.motion_model, ModifiedAckermannModel):
+            state_predictor_motion_model = self.motion_model.copy()
+            state_predictor_motion_model.use_tensor = True
+        else:
+            state_predictor_motion_model = None
+        self.state_predictor.set_motion_model(state_predictor_motion_model)
+
         logging.info('Planning depth: {}'.format(self.planning_depth))
         logging.info('Planning width: {}'.format(self.planning_width))
         logging.info('Sparse search: {}'.format(self.sparse_search))
@@ -98,27 +108,51 @@ class ModelPredictiveRL(Policy):
         if hasattr(env_config, "robot_kinematics"):
             self.kinematics = env_config.robot_kinematics
         else:
-            self.kinematics = config.action_space.kinematics
+            self.kinematics = config.robot.action_space.kinematics
+        if hasattr(env_config, "robot_length"):
+            robot_length = env_config.robot_length
+        elif hasattr(config.robot, "length"):
+            robot_length = config.robot.length
+        else:
+            if self.kinematics == "single_track":
+                raise ValueError("robot length required in config for single_track motion_model")
+            else:
+                robot_length = None
+
+        if hasattr(env_config, "robot_lf_ratio"):
+            robot_lf_ratio = env_config.robot_lf_ratio
+        elif hasattr(config.robot, "lf_ratio"):
+            robot_lf_ratio = config.robot.lf_ratio
+        else:
+            if self.kinematics == "single_track":
+                raise ValueError("lf_ratio required in config for single_track motion_model")
+            else:
+                robot_lf_ratio = None
+
+        if self.kinematics == "single_track":
+            self.motion_model = ModifiedAckermannModel(robot_length, robot_lf_ratio,
+                                                       use_tensor=False, timestep=self.time_step)
+
         if hasattr(env_config, "robot_speed_sampling"):
             self.speed_sampling = env_config.robot_speed_sampling
         else:
-            self.speed_sampling = config.action_space.speed_sampling
+            self.speed_sampling = config.robot.action_space.speed_sampling
         if hasattr(env_config, "robot_rotation_sampling"):
             self.rotation_sampling = env_config.robot_rotation_sampling
         else:
-            self.rotation_sampling = config.action_space.rotation_sampling
+            self.rotation_sampling = config.robot.action_space.rotation_sampling
         if hasattr(env_config, "num_speeds"):
             self.speed_samples = env_config.num_speeds
         else:
-            self.speed_samples = config.action_space.speed_samples
+            self.speed_samples = config.robot.action_space.speed_samples
         if hasattr(env_config, "num_angles"):
             self.rotation_samples = env_config.num_angles
         else:
-            self.rotation_samples = config.action_space.rotation_samples
+            self.rotation_samples = config.robot.action_space.rotation_samples
         if hasattr(env_config, "rotation_constraint"):
             self.rotation_constraint = env_config.rotation_constraint
         else:
-            self.rotation_constraint = config.action_space.rotation_constraint
+            self.rotation_constraint = config.robot.action_space.rotation_constraint
         self.reward = config.reward
 
     def set_device(self, device):
@@ -131,7 +165,9 @@ class ModelPredictiveRL(Policy):
 
     def set_time_step(self, time_step):
         self.time_step = time_step
-        self.state_predictor.time_step = time_step
+        self.state_predictor.set_time_step(time_step)
+        if isinstance(self.motion_model, ModifiedAckermannModel):
+            self.motion_model.setTimeStep(time_step)
 
     def get_normalized_gamma(self):
         return pow(self.gamma, self.time_step * self.v_pref)
@@ -321,13 +357,19 @@ class ModelPredictiveRL(Policy):
         d_0 = human_states.position - robot_state.position
 
         # compute robot velocity vector
-        new_angle = robot_state.angle + action[1]
         if self.kinematics == 'holonomic':
+            new_angle = robot_state.orientation + action[1]
             vx = action[0] * np.cos(new_angle)
             vy = action[0] * np.sin(new_angle)
+            robot_velocity = np.array([vx, vy])
+        elif self.kinematics == 'single_track':
+            self.motion_model.setPose(robot_state.position, robot_state.orientation)
+            self.motion_model.computeNextPosition(action)
+            robot_velocity = self.motion_model.center_velocity_components
         else:
-            raise NotImplementedError("nonholonomic motion model not implemented yet")
-        robot_velocity = np.array([vx, vy]).reshape(1, 2)
+            raise NotImplementedError("other motion models not implemented yet")
+
+        robot_velocity = robot_velocity.reshape(1, 2)
 
         # velocity difference between robot and human (for all humans)
         d_velocity = human_states.velocity - robot_velocity
@@ -347,8 +389,12 @@ class ModelPredictiveRL(Policy):
         # collision detection with obstacles
         if self.kinematics == 'holonomic':
             end_position = robot_state.position + robot_velocity * self.time_step
+        elif self.kinematics == 'single_track':
+            end_position = self.motion_model.pos_center
         else:
-            raise NotImplementedError("nonholonomic motion model not implemented yet")
+            raise NotImplementedError("other motion models not implemented yet")
+
+        # TODO: not only check for circle collision (via radius) but also rectangle (spanned by radius + length)
         d_min2obs = point_to_segment_dist(robot_state.position, end_position, obstacles.position) - robot_state.radius
         d_min2obs = np.min(d_min2obs)
 

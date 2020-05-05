@@ -44,6 +44,8 @@ class BaseEnvConfig(object):
     robot.visible = True
     robot.policy = 'none'
     robot.radius = 0.3
+    robot.length = 2  # length of robot, required for nonholonomic motion model
+    robot.lf_ratio = 0.7  # center_of_mass ratio, required for nonholonomic motion model
     robot.v_pref = 1
     robot.sensor_range = 50
     robot.fov = 1.7174  # field of view (FOV) in rad
@@ -51,7 +53,7 @@ class BaseEnvConfig(object):
     robot.rotation_constraint = np.pi / 3
 
     robot.action_space = Config()
-    robot.action_space.kinematics = 'holonomic'
+    robot.action_space.kinematics = 'single_track'  # 'holonomic'
     robot.action_space.speed_samples = 5
     robot.action_space.rotation_samples = 16
     robot.action_space.speed_sampling = 'exponential'
@@ -76,10 +78,11 @@ class BasePolicyConfig(object):
     om.om_channel_size = 3
 
     action_space = Config()
-    action_space.kinematics = 'holonomic'
+    action_space.kinematics = 'single_track'  # 'holonomic'
     action_space.speed_samples = 5
     action_space.rotation_samples = 16
-    action_space.sampling = 'exponential'
+    action_space.speed_sampling = 'exponential'
+    action_space.rotation_sampling = 'linear'
     action_space.query_env = False
     action_space.rotation_constraint = np.pi / 3
 

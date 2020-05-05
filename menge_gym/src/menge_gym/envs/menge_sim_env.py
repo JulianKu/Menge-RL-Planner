@@ -19,6 +19,7 @@ from .utils.info import *
 from .utils.tracking import Sort, KalmanTracker
 from .utils.format import format_array
 from .utils.state import FullState, ObservableState, ObstacleState, JointState
+from .utils.motion_model import ModifiedAckermannModel
 from typing import List, Union
 
 
@@ -50,6 +51,7 @@ class MengeGym(gym.Env):
 
         # Robot variables
         self.config.robot_config = None
+        self.config.robot_kinematics = None
         self.config.robot_speed_sampling = None
         self.config.robot_rotation_sampling = None
         self.config.num_speeds = None
@@ -57,6 +59,9 @@ class MengeGym(gym.Env):
         self.config.rotation_constraint = None
         self.config.robot_v_pref = None
         self.config.robot_visibility = None
+        self.config.robot_length = None
+        self.config.robot_lf_ratio = None
+        self.robot_motion_model = None  # type: Union[ModifiedAckermannModel, None]
         self.goal = None
         self.robot_const_state = None
 
@@ -158,7 +163,9 @@ class MengeGym(gym.Env):
                         self.config.robot_config['end_angle'] = config.robot.fov / 2
                     elif param == 'sensor_resolution':
                         self.config.robot_config['increment'] = config.robot.sensor_resolution
-
+                if self.config.robot_kinematics == 'single_track':
+                    self.robot_motion_model = ModifiedAckermannModel(self.config.robot_length,
+                                                                     self.config.robot_lf_ratio)
                 kwargs = {}
                 if hasattr(config.sim, 'human_num'):
                     kwargs['num_agents'] = config.sim.human_num
@@ -202,6 +209,13 @@ class MengeGym(gym.Env):
         self.config.robot_speed_sampling = config.robot.action_space.speed_sampling
         self.config.robot_rotation_sampling = config.robot.action_space.rotation_sampling
         self.config.robot_visibility = config.robot.visible
+
+        self.config.robot_kinematics = config.robot.action_space.kinematics
+        if hasattr(config.robot, 'length'):
+            self.config.robot_length = config.robot.length
+        if hasattr(config.robot, 'lf_ratio'):
+            self.config.robot_lf_ratio = config.robot.lf_ratio
+
         # action space
         # from paper RGL for CrowdNav --> 6 speeds [0, v_pref] and 16 headings [0, 2*pi)
         if self.config.robot_speed_sampling == 'exponential':
@@ -370,15 +384,31 @@ class MengeGym(gym.Env):
 
     def _cmd_vel_srv_handler(self, request):
         rp.logdebug('Command Velocity service requested')
-        if self._action is not None:
+
+        action = self._action
+        if action is not None:
+            robot_state = self.observation.robot_state
+            velocity_action = self._velocities[action[0]]
+            steering_angle_action = self._angles[action[1]]
+
+            if isinstance(self.robot_motion_model, ModifiedAckermannModel):
+                # transform front wheel velocity and steering angle into center velocity and center velocity angle
+                self.robot_motion_model.setPose(robot_state.position, robot_state.orientation[0])
+                self.robot_motion_model.computeNextPosition(np.array((velocity_action, steering_angle_action)))
+                center_velocity_components = self.robot_motion_model.center_velocity_components
+                velocity_action = np.linalg.norm(center_velocity_components)
+                steering_angle_action = np.arctan2(*center_velocity_components)
+            elif self.robot_motion_model is None:
+                # in menge_ros the published angle defines the absolute angle based on map coordinate system
+                steering_angle_action += robot_state.orientation[0]
+
             cmd_vel_msg = Twist()
-            cmd_vel_msg.linear.x = self._velocities[self._action[0]]  # vel_action
+            cmd_vel_msg.linear.x = velocity_action
             cmd_vel_msg.linear.y = 0
             cmd_vel_msg.linear.z = 0
             cmd_vel_msg.angular.x = 0
             cmd_vel_msg.angular.y = 0
-            # in menge_ros the published angle defines the absolute angle based on map coordinate system
-            cmd_vel_msg.angular.z = self.observation.robot_state.angle[0] + self._angles[self._action[1]]  # angle_action
+            cmd_vel_msg.angular.z = steering_angle_action
             return CmdVelResponse(True, cmd_vel_msg)
         else:
             return CmdVelResponse(False, Twist())

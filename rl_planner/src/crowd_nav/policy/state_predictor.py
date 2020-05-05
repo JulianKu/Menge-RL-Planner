@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import numpy as np
 from crowd_nav.policy.helpers import mlp
@@ -16,6 +15,15 @@ class StatePredictor(nn.Module):
         self.graph_model = graph_model
         self.human_motion_predictor = mlp(config.gcn.X_dim, config.model_predictive_rl.motion_predictor_dims)
         self.time_step = time_step
+        self.motion_model = None
+
+    def set_motion_model(self, motion_model):
+        self.motion_model = motion_model
+
+    def set_time_step(self, time_step: float):
+        self.time_step = time_step
+        if hasattr(self.motion_model, 'timestep'):
+            self.motion_model.setTimeStep(time_step)
 
     def forward(self, state, action, detach=False):
         """ Predict the next state tensor given current state as input.
@@ -64,7 +72,7 @@ class StatePredictor(nn.Module):
         if robot_state.shape[0] != 1:
             raise NotImplementedError
 
-        # px, py, vx, vy, radius, gx, gy, v_pref, theta
+        # px, py, theta, radius, vx, vy, theta_dot, gx, gy, g_r, v_pref
         next_state = robot_state.clone().squeeze()
         if self.kinematics == 'holonomic':
             # TODO: velocity update might need refinement (temporal dynamics)
@@ -76,8 +84,14 @@ class StatePredictor(nn.Module):
             next_state[2] = next_angle
             next_state[4] = vx
             next_state[5] = vy
+        elif self.kinematics == 'single_track':
+            self.motion_model.setPose(next_state[:2], next_state[2])
+            self.motion_model.computeNextPosition(action)
+            next_state[:2] = self.motion_model.pos_center
+            next_state[2] = self.motion_model.orientation
+            next_state[4:6] = self.motion_model.center_velocity_components
         else:
-            raise NotImplementedError("nonholonomic motion model not implemented yet")
+            raise NotImplementedError("other motion models not implemented yet")
 
         return next_state.unsqueeze(0).unsqueeze(0)
 
@@ -92,6 +106,10 @@ class LinearStatePredictor(object):
         self.trainable = False
         self.kinematics = config.action_space.kinematics
         self.time_step = time_step
+        self.motion_model = None
+
+    def set_motion_model(self, motion_model):
+        self.motion_model = motion_model
 
     def __call__(self, state, action):
         """ Predict the next state tensor given current state as input.
@@ -126,8 +144,14 @@ class LinearStatePredictor(object):
             next_state[2] = next_angle
             next_state[4] = vx
             next_state[5] = vy
+        elif self.kinematics == 'single_track':
+            self.motion_model.setPose(next_state[:2], next_state[2])
+            self.motion_model.computeNextPosition(action)
+            next_state[:2] = self.motion_model.pos_center
+            next_state[2] = self.motion_model.orientation
+            next_state[4:6] = self.motion_model.center_velocity_components
         else:
-            raise NotImplementedError("nonholonomic motion model not implemented yet")
+            raise NotImplementedError("other motion models not implemented yet")
 
         return next_state.unsqueeze(0).unsqueeze(0)
 

@@ -12,7 +12,7 @@ class FullState(object):
         self.observable_state = state[:, :7]
 
         self.position = state[:, :2]
-        self.angle = state[:, 2]
+        self.orientation = state[:, 2]
         self.radius = state[:, 3]
         self.velocity = state[:, 4:6]
         self.angular_velocity = state[:, 6]
@@ -50,7 +50,7 @@ class ObservableState(object):
         self.state = state[:, :7]
 
         self.position = state[:, :2]
-        self.angle = state[:, 2]
+        self.orientation = state[:, 2]
         self.radius = state[:, 3]
         self.velocity = state[:, 4:6]
         self.angular_velocity = state[:, 6]
