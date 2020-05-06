@@ -76,7 +76,7 @@ class Explorer(object):
             elif isinstance(info, Timeout):
                 timeout += 1
                 timeout_cases.append(i)
-                timeout_times.append(self.env.time_limit)
+                timeout_times.append(self.env.config.time_limit)
             else:
                 raise ValueError('Invalid end signal from environment')
 
@@ -103,8 +103,11 @@ class Explorer(object):
         collision_types = Counter(collision_types)
         collision_type_rates = {col_type: collision_types[col_type] * collision_rate / sum(collision_types.values())
                                 for col_type in collision_types}
+        for col_type in ["Crowd", "Obstacle"]:
+            if col_type not in collision_types:
+                collision_type_rates[col_type] = 0
 
-        avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.time_limit
+        avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.config.time_limit
 
         extra_info = '' if episode is None else 'in episode {} '.format(episode)
         extra_info = extra_info + '' if epoch is None else extra_info + ' in epoch {} '.format(epoch)

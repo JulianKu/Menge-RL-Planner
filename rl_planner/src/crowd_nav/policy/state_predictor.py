@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import numpy as np
 from crowd_nav.policy.helpers import mlp
@@ -16,20 +15,48 @@ class StatePredictor(nn.Module):
         self.graph_model = graph_model
         self.human_motion_predictor = mlp(config.gcn.X_dim, config.model_predictive_rl.motion_predictor_dims)
         self.time_step = time_step
+        self.motion_model = None
+
+    def set_motion_model(self, motion_model):
+        self.motion_model = motion_model
+
+    def set_time_step(self, time_step: float):
+        self.time_step = time_step
+        if hasattr(self.motion_model, 'timestep'):
+            self.motion_model.setTimeStep(time_step)
 
     def forward(self, state, action, detach=False):
         """ Predict the next state tensor given current state as input.
 
         :return: tensor of shape (batch_size, # of agents, feature_size)
         """
+
         assert len(state[0].shape) == 3
-        assert len(state[1].shape) == 3
+
+        if isinstance(state[1], tuple):
+            # human_states contain mask and zero padded state batch
+            if isinstance(state[1][1], tuple):
+                # human_states also contain identifiers for each human
+                assert len(state[1][1][0].shape) == 3
+                human_identifiers = state[1][1][1]
+            else:
+                assert len(state[1][1].shape) == 3
+                human_identifiers = None
+        else:
+            assert len(state[1].shape) == 3
+            human_identifiers = None
         # state[2] = obstacles -> global position remains unchanged
-        assert len(state[2].shape) == 3
+        if isinstance(state[2], tuple):
+            # obstacles contain mask and zero padded state batch
+            assert len(state[2][1].shape) == 3
+        else:
+            assert len(state[2].shape) == 3
 
         state_embedding = self.graph_model(state)
         if detach:
             state_embedding = state_embedding.detach()
+            if human_identifiers is not None:
+                human_identifiers = human_identifiers.detach()
         if action is None:
             # for training purpose
             next_robot_state = None
@@ -37,7 +64,7 @@ class StatePredictor(nn.Module):
             next_robot_state = self.compute_next_state(state[0], action)
         next_human_states = self.human_motion_predictor(state_embedding)[:, 1:, :]
 
-        next_observation = [next_robot_state, next_human_states, state[2]]
+        next_observation = (next_robot_state, (next_human_states, human_identifiers), state[2])
         return next_observation
 
     def compute_next_state(self, robot_state, action):
@@ -45,7 +72,7 @@ class StatePredictor(nn.Module):
         if robot_state.shape[0] != 1:
             raise NotImplementedError
 
-        # px, py, vx, vy, radius, gx, gy, v_pref, theta
+        # px, py, theta, radius, vx, vy, theta_dot, gx, gy, g_r, v_pref
         next_state = robot_state.clone().squeeze()
         if self.kinematics == 'holonomic':
             # TODO: velocity update might need refinement (temporal dynamics)
@@ -57,8 +84,14 @@ class StatePredictor(nn.Module):
             next_state[2] = next_angle
             next_state[4] = vx
             next_state[5] = vy
+        elif self.kinematics == 'single_track':
+            self.motion_model.setPose(next_state[:2], next_state[2])
+            self.motion_model.computeNextPosition(action)
+            next_state[:2] = self.motion_model.pos_center
+            next_state[2] = self.motion_model.orientation
+            next_state[4:6] = self.motion_model.center_velocity_components
         else:
-            raise NotImplementedError("nonholonomic motion model not implemented yet")
+            raise NotImplementedError("other motion models not implemented yet")
 
         return next_state.unsqueeze(0).unsqueeze(0)
 
@@ -73,6 +106,10 @@ class LinearStatePredictor(object):
         self.trainable = False
         self.kinematics = config.action_space.kinematics
         self.time_step = time_step
+        self.motion_model = None
+
+    def set_motion_model(self, motion_model):
+        self.motion_model = motion_model
 
     def __call__(self, state, action):
         """ Predict the next state tensor given current state as input.
@@ -107,8 +144,14 @@ class LinearStatePredictor(object):
             next_state[2] = next_angle
             next_state[4] = vx
             next_state[5] = vy
+        elif self.kinematics == 'single_track':
+            self.motion_model.setPose(next_state[:2], next_state[2])
+            self.motion_model.computeNextPosition(action)
+            next_state[:2] = self.motion_model.pos_center
+            next_state[2] = self.motion_model.orientation
+            next_state[4:6] = self.motion_model.center_velocity_components
         else:
-            raise NotImplementedError("nonholonomic motion model not implemented yet")
+            raise NotImplementedError("other motion models not implemented yet")
 
         return next_state.unsqueeze(0).unsqueeze(0)
 

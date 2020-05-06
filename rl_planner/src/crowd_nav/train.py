@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 import logging
 import argparse
@@ -26,6 +28,9 @@ def set_random_seeds(seed):
 
 
 def main(args):
+    # set current working directory (cwd) to this script's location
+    os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
     set_random_seeds(args.randomseed)
     # configure paths
     make_new_dir = True
@@ -85,7 +90,7 @@ def main(args):
     # configure environment
     env_config = config.EnvConfig(args.debug)
     env = gym.make("menge_gym:MengeGym-v0")
-    env.configure(env_config)
+    env.configure(env_config, args.randomseed)
     if hasattr(env, 'roshandle'):
         env.setup_ros_connection()
 
@@ -152,7 +157,7 @@ def main(args):
             raise NotImplementedError('Invisible Robot not implemented for Menge Sim')
             # safety_space = train_config.imitation_learning.safety_space
         il_policy = policy_factory[il_policy]()
-        il_policy.configure(policy_action_space)
+        il_policy.configure(config, env.config, policy_action_space)
         il_policy.multiagent_training = policy.multiagent_training
         il_policy.safety_space = safety_space
         robot.set_policy(il_policy)

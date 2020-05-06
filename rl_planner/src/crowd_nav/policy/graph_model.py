@@ -131,12 +131,33 @@ class RGL(nn.Module):
         :param state:
         :return:
         """
+
         robot_state, human_states, static_obs = state
+
+        if isinstance(human_states, torch.Tensor):
+            human_mask = 1
+        elif isinstance(human_states, tuple):
+            if isinstance(human_states[1], tuple):
+                (human_mask, (human_states, _)) = human_states
+            else:
+                human_states, _ = human_states
+                human_mask = 1
+        else:
+            raise NotImplementedError("human_states must be Tensor, tuple of Tensors (state, identifiers) "
+                                      "or tuple of Tensor and tuple (mask, (state, identifiers))")
+
+        if isinstance(static_obs, torch.Tensor):
+            obs_mask = 1
+        elif isinstance(static_obs, tuple):
+            obs_mask, static_obs = static_obs
+        else:
+            raise NotImplementedError("static_obs must be Tensor or tuple of Tensors (mask, state)")
 
         # compute feature matrix X
         robot_state_embeddings = self.w_r(robot_state)
-        human_state_embeddings = self.w_h(human_states)
-        obstacle_embeddings = self.w_s(static_obs)
+        human_state_embeddings = human_mask * self.w_h(human_states)  # mask out padded values from embedded human state
+        obstacle_embeddings = obs_mask * self.w_s(static_obs)  # mask out padded values from embedded obstacle state
+
         X = torch.cat([robot_state_embeddings, human_state_embeddings], dim=1)
 
         # compute matrix A

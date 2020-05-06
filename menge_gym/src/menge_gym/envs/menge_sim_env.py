@@ -6,9 +6,10 @@ import numpy as np
 from os import path
 import rospy as rp
 import rosnode
+import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32
 from menge_srv.srv import RunSim, CmdVel, CmdVelResponse
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
@@ -18,6 +19,7 @@ from .utils.info import *
 from .utils.tracking import Sort, KalmanTracker
 from .utils.format import format_array
 from .utils.state import FullState, ObservableState, ObstacleState, JointState
+from .utils.motion_model import ModifiedAckermannModel
 from typing import List, Union
 
 
@@ -41,14 +43,15 @@ class MengeGym(gym.Env):
 
         # Simulation scenario variables
         self.config.scenario_xml = None
+        self.scenario_root = None
         self.scene_xml = None
         self.behavior_xml = None
         self.initial_robot_pos = None
         self.goals_array = None
-        self.global_time = None
 
         # Robot variables
         self.config.robot_config = None
+        self.config.robot_kinematics = None
         self.config.robot_speed_sampling = None
         self.config.robot_rotation_sampling = None
         self.config.num_speeds = None
@@ -56,6 +59,9 @@ class MengeGym(gym.Env):
         self.config.rotation_constraint = None
         self.config.robot_v_pref = None
         self.config.robot_visibility = None
+        self.config.robot_length = None
+        self.config.robot_lf_ratio = None
+        self.robot_motion_model = None  # type: Union[ModifiedAckermannModel, None]
         self.goal = None
         self.robot_const_state = None
 
@@ -71,7 +77,7 @@ class MengeGym(gym.Env):
         # Observation variables
         self._crowd_poses = []  # type: List[np.ndarray]
         self._robot_poses = []  # type: List[np.ndarray]
-        self._static_obstacles = np.array([], dtype=float)
+        self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
         self.rob_tracker = None
         self.ped_tracker = None
         self.observation = None
@@ -92,13 +98,17 @@ class MengeGym(gym.Env):
         self.roshandle = None
         self._sim_pid = None
         self._pub_run = None
-        self._step_done = None
+        self.global_time = None
+        self._prev_time = None
         self._cmd_vel_srv = None
         self._advance_sim_srv = None
         self.config.ros_rate = None
         self._rate = None
 
-    def configure(self, config):
+        # Random Seed
+        self.seed = None
+
+    def configure(self, config, seed=None):
 
         self.config = Config()
 
@@ -153,7 +163,9 @@ class MengeGym(gym.Env):
                         self.config.robot_config['end_angle'] = config.robot.fov / 2
                     elif param == 'sensor_resolution':
                         self.config.robot_config['increment'] = config.robot.sensor_resolution
-
+                if self.config.robot_kinematics == 'single_track':
+                    self.robot_motion_model = ModifiedAckermannModel(self.config.robot_length,
+                                                                     self.config.robot_lf_ratio)
                 kwargs = {}
                 if hasattr(config.sim, 'human_num'):
                     kwargs['num_agents'] = config.sim.human_num
@@ -169,6 +181,10 @@ class MengeGym(gym.Env):
                 self.config.scenario_xml = img_parser.output['base']
         # get more parameters from scenario xml
         self._initialize_from_scenario()
+
+        # Random Seed
+        self.seed = seed
+        self._set_seed()
 
         # setup pedestrian tracker
         self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*self.config.robot_v_pref*self.config.time_step)
@@ -193,6 +209,13 @@ class MengeGym(gym.Env):
         self.config.robot_speed_sampling = config.robot.action_space.speed_sampling
         self.config.robot_rotation_sampling = config.robot.action_space.rotation_sampling
         self.config.robot_visibility = config.robot.visible
+
+        self.config.robot_kinematics = config.robot.action_space.kinematics
+        if hasattr(config.robot, 'length'):
+            self.config.robot_length = config.robot.length
+        if hasattr(config.robot, 'lf_ratio'):
+            self.config.robot_lf_ratio = config.robot.lf_ratio
+
         # action space
         # from paper RGL for CrowdNav --> 6 speeds [0, v_pref] and 16 headings [0, 2*pi)
         if self.config.robot_speed_sampling == 'exponential':
@@ -235,9 +258,9 @@ class MengeGym(gym.Env):
     def _initialize_from_scenario(self):
         scenario_xml = self.config.scenario_xml
         scenario_dir = path.split(scenario_xml)[0]
-        scenario_root = parseXML(scenario_xml)
+        self.scenario_root = parseXML(scenario_xml)
 
-        scene_xml = scenario_root.get('scene')
+        scene_xml = self.scenario_root.get('scene')
         if not path.isabs(scene_xml):
             self.scene_xml = path.join(scenario_dir, scene_xml)
         else:
@@ -259,7 +282,7 @@ class MengeGym(gym.Env):
             self.config.robot_v_pref = float(scene_root.find("AgentProfile[@name='{}']/Common"
                                                              .format(inherited_agt_profile)).get('pref_speed'))
 
-        behavior_xml = scenario_root.get('behavior')
+        behavior_xml = self.scenario_root.get('behavior')
         if not path.isabs(behavior_xml):
             self.behavior_xml = path.join(scenario_dir, behavior_xml)
         assert path.isfile(self.behavior_xml), 'Behavior file specified in scenario_xml non-existent'
@@ -268,6 +291,17 @@ class MengeGym(gym.Env):
         behavior_root = parseXML(self.behavior_xml)
         goals = behavior_root.findall("GoalSet/Goal")
         self.goals_array = np.array([goal2array(goal) for goal in goals])
+
+    def _set_seed(self):
+        """set random seed in numpy, for simulation and write to scenario xml"""
+
+        if self.seed is not None:
+
+            np.random.seed(self.seed)
+
+            self.scenario_root.set("random", str(self.seed))
+            scenario_tree = ElT.ElementTree(self.scenario_root)
+            scenario_tree.write(self.config.scenario_xml, xml_declaration=True, encoding='utf-8', method="xml")
 
     def sample_goal(self, exclude_initial: bool = False):
         """
@@ -306,20 +340,12 @@ class MengeGym(gym.Env):
         rp.on_shutdown(self.close)
 
         # simulation controls
-        rp.logdebug("Set up publishers and subscribers")
+        rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
         self._pub_run = rp.Publisher('run', Bool, queue_size=1)
-        self._step_done = False
-
-        # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
-        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
-        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
-        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
-        rp.Subscriber("done", Bool, self._done_callback, queue_size=50)
 
         # self._cmd_vel_pub = rp.Publisher('/cmd_vel', Twist, queue_size=50)
         self._cmd_vel_srv = rp.Service('cmd_vel_srv', CmdVel, self._cmd_vel_srv_handler)
-        self._advance_sim_srv = rp.ServiceProxy('advance_simulation', RunSim)
 
         # initialize time
         self._rate = rp.Rate(self.config.ros_rate)
@@ -352,20 +378,37 @@ class MengeGym(gym.Env):
         # update list of robot poses + pointer to current position
         self._robot_poses.append(np.array([robot_x, robot_y, robot_omega, self.config.robot_radius]).reshape(-1, 4))
 
-    def _done_callback(self, msg: Bool):
-        rp.logdebug('Done message received')
-        self._step_done = msg.data
+    def _sim_time_callback(self, msg: Float32):
+        rp.logdebug('Time message received')
+        self.global_time = msg.data
 
     def _cmd_vel_srv_handler(self, request):
-        if self._action is not None:
+        rp.logdebug('Command Velocity service requested')
+
+        action = self._action
+        if action is not None:
+            robot_state = self.observation.robot_state
+            velocity_action = self._velocities[action[0]]
+            steering_angle_action = self._angles[action[1]]
+
+            if isinstance(self.robot_motion_model, ModifiedAckermannModel):
+                # transform front wheel velocity and steering angle into center velocity and center velocity angle
+                self.robot_motion_model.setPose(robot_state.position, robot_state.orientation[0])
+                self.robot_motion_model.computeNextPosition(np.array((velocity_action, steering_angle_action)))
+                center_velocity_components = self.robot_motion_model.center_velocity_components
+                velocity_action = np.linalg.norm(center_velocity_components)
+                steering_angle_action = np.arctan2(*center_velocity_components)
+            elif self.robot_motion_model is None:
+                # in menge_ros the published angle defines the absolute angle based on map coordinate system
+                steering_angle_action += robot_state.orientation[0]
+
             cmd_vel_msg = Twist()
-            cmd_vel_msg.linear.x = self._velocities[self._action[0]]  # vel_action
+            cmd_vel_msg.linear.x = velocity_action
             cmd_vel_msg.linear.y = 0
             cmd_vel_msg.linear.z = 0
             cmd_vel_msg.angular.x = 0
             cmd_vel_msg.angular.y = 0
-            # in menge_ros the published angle defines the absolute angle based on map coordinate system
-            cmd_vel_msg.angular.z = self.observation.robot_state.angle[0] + self._angles[self._action[1]]  # angle_action
+            cmd_vel_msg.angular.z = steering_angle_action
             return CmdVelResponse(True, cmd_vel_msg)
         else:
             return CmdVelResponse(False, Twist())
@@ -383,6 +426,11 @@ class MengeGym(gym.Env):
 
         reward, done, info = self._get_reward_done_info()
 
+        if isinstance(info, Timeout) and not (self._robot_poses and self._crowd_poses):
+            # in Timeout cases, crowd_poses and robot_poses might be missing
+            self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
+            self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
+
         # in first iteration, initialize Kalman Tracker for robot
         if not self.rob_tracker:
             self.rob_tracker = KalmanTracker(self._robot_poses[0])
@@ -394,9 +442,10 @@ class MengeGym(gym.Env):
             # state = np.concatenate((robot_pose[:, :3], crowd_pose[:, :3]), axis=0)
             ped_trackers = self.ped_tracker.update(crowd_pose)
             self.rob_tracker.predict()
-            self.rob_tracker.update(robot_pose)
+            if np.any(robot_pose):
+                self.rob_tracker.update(robot_pose)
         rob_tracker = self.rob_tracker.get_state()
-        pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()][:, :-1])
+        pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()])
         robot_state = FullState(np.concatenate((rob_tracker, self.robot_const_state), axis=1))
         obstacle_state = ObstacleState(self._static_obstacles)
         self.observation = JointState(robot_state, pedestrian_state, obstacle_state)
@@ -405,6 +454,7 @@ class MengeGym(gym.Env):
         # reset last poses
         self._crowd_poses = []
         self._robot_poses = []
+        self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
 
         return ob, reward, done, info
 
@@ -428,17 +478,28 @@ class MengeGym(gym.Env):
             self._pub_run.publish(Bool(data=False))
         rp.logdebug("Service called")
         # wait for response from simulation, in the meantime publish cmd_vel
-        while not self._step_done or not self._crowd_poses or not self._robot_poses:
+        counter = 0
+        # while not (self.global_time >= self._prev_time + n_steps * self.config.time_step) \
+        #         and (not self._crowd_poses or not self._robot_poses):
+        while not self._crowd_poses or not self._robot_poses:
+            # handle simulation reaching time limit
+            if self.global_time + self.config.time_step > self.config.time_limit:
+                break
+
             # rp.logdebug("Publishing cmd_vel message")
             # self._cmd_vel_pub.publish(vel_msg)
             rp.logdebug('Simulation not done yet')
-            rp.logdebug('Done %r, #Crowd %d, #Rob %d' %
-                        (self._step_done, len(self._crowd_poses), len(self._robot_poses)))
+            rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
+            rp.logdebug('#Crowd %d, #Rob %d' %
+                        (len(self._crowd_poses), len(self._robot_poses)))
             self._rate.sleep()
-        rp.logdebug('Done %r, #Crowd %d, #Rob %d' %
-                    (self._step_done, len(self._crowd_poses), len(self._robot_poses)))
-        self.global_time += n_steps * self.config.time_step
-        self._step_done = False
+            counter += 1
+            if counter >= 10:
+                raise TimeoutError("Simulator node not responding")
+
+        rp.logdebug('Simulation step(s) done')
+        rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
+        self._prev_time = self.global_time
         self._action = None
 
         # self._pub_run.publish(Bool(data=True))
@@ -456,86 +517,88 @@ class MengeGym(gym.Env):
             reward, done, info
         """
 
-        # crowd_pose = [x, y, omega, r]
-        recent_crowd_pose = self._crowd_poses[-1]
-
-        # obstacle_position = [x, y]
-        obstacle_position = self._static_obstacles
-
-        # robot_pose = [x, y, omega]
-        recent_robot_pose = self._robot_poses[-1]
-
-        robot_radius = self.config.robot_radius
-        goal = self.goal
-
-        if np.any(recent_crowd_pose):
-            crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
-            crowd_distances -= recent_crowd_pose[:, -1]
-            crowd_distances -= robot_radius
-        else:
-            crowd_distances = np.array([])
-
-        if np.any(obstacle_position):
-            obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
-            obstacle_distances -= robot_radius
-        else:
-            obstacle_distances = np.array([])
-
-        # compute distance to closest pedestrian
-        if crowd_distances.size == 0:
-            # if no pedestrian, set to infinity
-            d_min_crowd = np.inf
-        else:
-            d_min_crowd = crowd_distances.min()
-
-        # compute distance to closest static obstacle
-        if obstacle_distances.size == 0:
-            # if no obstacles, set to infinity
-            d_min_obstacle = np.inf
-        else:
-            d_min_obstacle = obstacle_distances.min()
-
-        d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
-
-        # sim node terminated
-        if '/menge_sim' not in rosnode.get_node_names():
+        if self.global_time + self.config.time_step > self.config.time_limit:
+            # handle reward, etc. for simulation reaching time limit
             reward = 0
             done = True
             info = Timeout()
-        # collision with crowd
-        elif d_min_crowd < 0:
-            reward = self.config.collision_penalty_crowd
-            done = True
-            info = Collision('Crowd')
-        # collision with obstacle
-        elif d_min_obstacle < 0:
-            reward = self.config.collision_penalty_obs
-            done = True
-            info = Collision('Obstacle')
-        # goal reached
-        elif d_goal < 0:
-            reward = self.config.success_reward
-            done = True
-            info = ReachGoal()
-        # too close to people
-        elif d_min_crowd < self.config.discomfort_dist:
-            # adjust the reward based on FPS
-            reward = (d_min_crowd - self.config.discomfort_dist) * self.config.discomfort_penalty_factor \
-                     * self.config.time_step
-            done = False
-            info = Discomfort(d_min_crowd)
-        # too close to obstacles
-        elif d_min_obstacle < self.config.clearance_dist:
-            # adjust the reward based on FPS
-            reward = (d_min_obstacle - self.config.clearance_dist) * self.config.clearance_penalty_factor \
-                     * self.config.time_step
-            done = False
-            info = Clearance(d_min_obstacle)
+            return reward, done, info
         else:
-            reward = 0
-            done = False
-            info = Nothing()
-        return reward, done, info
+            # crowd_pose = [x, y, omega, r]
+            recent_crowd_pose = self._crowd_poses[-1]
+
+            # obstacle_position = [x, y]
+            obstacle_position = self._static_obstacles
+
+            # robot_pose = [x, y, omega]
+            recent_robot_pose = self._robot_poses[-1]
+
+            robot_radius = self.config.robot_radius
+            goal = self.goal
+
+            if np.any(recent_crowd_pose):
+                crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
+                crowd_distances -= recent_crowd_pose[:, -1]
+                crowd_distances -= robot_radius
+            else:
+                crowd_distances = np.array([])
+
+            if np.any(obstacle_position):
+                obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
+                obstacle_distances -= robot_radius
+            else:
+                obstacle_distances = np.array([])
+
+            # compute distance to closest pedestrian
+            if crowd_distances.size == 0:
+                # if no pedestrian, set to infinity
+                d_min_crowd = np.inf
+            else:
+                d_min_crowd = crowd_distances.min()
+
+            # compute distance to closest static obstacle
+            if obstacle_distances.size == 0:
+                # if no obstacles, set to infinity
+                d_min_obstacle = np.inf
+            else:
+                d_min_obstacle = obstacle_distances.min()
+
+            d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+
+            # collision with crowd
+            if d_min_crowd < 0:
+                reward = self.config.collision_penalty_crowd
+                done = True
+                info = Collision('Crowd')
+            # collision with obstacle
+            elif d_min_obstacle < 0:
+                reward = self.config.collision_penalty_obs
+                done = True
+                info = Collision('Obstacle')
+            # goal reached
+            elif d_goal < 0:
+                reward = self.config.success_reward
+                done = True
+                info = ReachGoal()
+            # too close to people
+            elif d_min_crowd < self.config.discomfort_dist:
+                # adjust the reward based on FPS
+                reward = (d_min_crowd - self.config.discomfort_dist) * self.config.discomfort_penalty_factor \
+                         * self.config.time_step
+                done = False
+                info = Discomfort(d_min_crowd)
+            # too close to obstacles
+            elif d_min_obstacle < self.config.clearance_dist:
+                # adjust the reward based on FPS
+                reward = (d_min_obstacle - self.config.clearance_dist) * self.config.clearance_penalty_factor \
+                         * self.config.time_step
+                done = False
+                info = Clearance(d_min_obstacle)
+            else:
+                reward = 0
+                done = False
+                info = Nothing()
+            return reward, done, info
 
     def reset(self, phase='test', test_case=None):
         """
@@ -548,7 +611,8 @@ class MengeGym(gym.Env):
 
         if test_case is not None:
             self.case_counter[phase] = test_case
-        self.global_time = 0
+        self.global_time = 0.0
+        self._prev_time = -1
 
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
@@ -556,7 +620,7 @@ class MengeGym(gym.Env):
         if self.case_counter[phase] >= 0:
             new_seed = base_seed[phase] + self.case_counter[phase]
             np.random.seed(new_seed)
-            self.seed(new_seed)
+            self.seed = new_seed
             if phase == 'test':
                 rp.logdebug('current test seed is:{}'.format(new_seed))
             self.case_counter[phase] = (self.case_counter[phase] + 1) % self.case_size[phase]
@@ -574,6 +638,14 @@ class MengeGym(gym.Env):
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(5)
 
+        rp.logdebug("Set up subscribers and service proxies")
+        # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
+        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
+        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
+        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
+        rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50)
+        self._advance_sim_srv = rp.ServiceProxy('advance_simulation', RunSim)
+
         # Sample new goal
         self.sample_goal(exclude_initial=True)
 
@@ -589,10 +661,11 @@ class MengeGym(gym.Env):
         states = self.observation  # type: JointState
         rob_state = states.robot_state.observable_state
         ped_states = states.human_states.state
+        ped_identifiers = states.human_states.get_identifiers()
         if len(rob_state) or len(ped_states):
             rp.loginfo('Tracked Objects')
             combined_state = np.concatenate((rob_state, ped_states), axis=0)
-            row_labels = ['human {}'.format(i+1) for i in range(len(ped_states))]
+            row_labels = ['human {}'.format(int(i)) for i in ped_identifiers]
             if len(rob_state):
                 row_labels.insert(0, 'robot')
             state_str = format_array(combined_state,

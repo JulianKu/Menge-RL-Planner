@@ -1,5 +1,6 @@
 import numpy as np
 
+eps = np.finfo(float).eps
 
 def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     """
@@ -32,7 +33,8 @@ def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     bx = x - b
     # compute points on line through a and b that are closest to x
     # equivalent formula for single point and line: a + dot(ax, ab)/dot(ab, ab) * ab
-    closest_points = a + ((ax * ab).sum(-1) / (ab * ab).sum(-1)).reshape(-1, 1).repeat(2, axis=1) * ab
+    # stabilized by adding eps in denominator
+    closest_points = a + ((ax * ab).sum(-1) / (ab * ab + eps).sum(-1)).reshape(-1, 1).repeat(2, axis=1) * ab
 
     # determine whether closest_points lie on line segment
     ac = closest_points - a
@@ -53,3 +55,23 @@ def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     d_min[mask] = dist_c[mask]
 
     return d_min
+
+
+def mahalanobis_dist_nd(x: np.ndarray, y: np.ndarray):
+    """
+    compute the mahalanobis distance between two nd arrays where the last dimension gives the data dimensionality
+    :param x: first array, shape (..., d)
+    :param y: second array, shape (..., d)
+    :return: mahalanobis distance between x and y
+    """
+
+    assert x.shape[-1] == y.shape[-1], "Last dimension has to be the same for both arrays"
+
+    xx = x.reshape(-1, x.shape[-1])
+    yy = y.reshape(-1, y.shape[-1])
+    delta = xx - yy
+    inv = np.linalg.inv(np.cov(np.vstack([xx, yy]).T)).T
+    return_shape = x.shape[:-1] if len(x.shape) >= len(y.shape) else y.shape[:-1]
+
+    return np.sqrt(np.einsum('nj,jk,nk->n', delta, inv, delta)).reshape(return_shape)
+
