@@ -55,13 +55,13 @@
   <depend>menge_gym</depend>
 <!--  <depend>roslaunch</depend>-->
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
   <exec_depend>python3-tensorboardX-pip</exec_depend>
+  <exec_depend>python3-tqdm</exec_depend>
   <exec_depend>python-gitpython-pip</exec_depend>
-  <exec_depend>python-matplotlib</exec_depend>
-  <exec_depend>python-scipy</exec_depend>
   <exec_depend>python-pytorch-pip</exec_depend> <!-- includes both torch and torchvision -->
   <exec_depend>python-seaborn</exec_depend>
-  <exec_depend>python-tqdm</exec_depend>
   <exec_depend>gym-pip</exec_depend>
   <!-- The export tag contains other, unspecified, tags -->
   <export>
