@@ -5,7 +5,6 @@ from gym import spaces
 import numpy as np
 from os import path
 import rospy as rp
-import rosnode
 import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
@@ -13,7 +12,7 @@ from std_msgs.msg import Bool, Float32
 from menge_srv.srv import RunSim, CmdVel, CmdVelResponse
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
-from .utils.ros import obstacle2array, marker2array, ROSHandle  # ,pose2array, launch
+from .utils.ros import obstacle2array, marker2array, ROSHandle
 from .utils.params import goal2array, get_robot_initial_position, parseXML
 from .utils.info import *
 from .utils.tracking import Sort, KalmanTracker
@@ -350,12 +349,6 @@ class MengeGym(gym.Env):
         # initialize time
         self._rate = rp.Rate(self.config.ros_rate)
 
-    # def _crowd_pose_callback(self, msg: PoseArray):
-    #     rp.logdebug('Crowd Pose subscriber callback called')
-    #     # transform PoseArray message to numpy array
-    #     pose_array = np.array(list(map(pose2array, msg.poses)))
-    #     self._crowd_poses.append(pose_array)
-
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
         # transform MarkerArray message to numpy array
@@ -386,7 +379,7 @@ class MengeGym(gym.Env):
         rp.logdebug('Command Velocity service requested')
 
         action = self._action
-        if action is not None:
+        if action is not None and hasattr(self.observation, 'robot_state'):
             robot_state = self.observation.robot_state
             velocity_action = self._velocities[action[0]]
             steering_angle_action = self._angles[action[1]]
@@ -402,6 +395,9 @@ class MengeGym(gym.Env):
                 # in menge_ros the published angle defines the absolute angle based on map coordinate system
                 steering_angle_action += robot_state.orientation[0]
 
+            rp.logdebug('Setting action with vel={:.2f} and steering angle={:.2f}'.format(velocity_action,
+                                                                                          steering_angle_action))
+
             cmd_vel_msg = Twist()
             cmd_vel_msg.linear.x = velocity_action
             cmd_vel_msg.linear.y = 0
@@ -411,14 +407,11 @@ class MengeGym(gym.Env):
             cmd_vel_msg.angular.z = steering_angle_action
             return CmdVelResponse(True, cmd_vel_msg)
         else:
+            rp.logdebug('Setting no action')
             return CmdVelResponse(False, Twist())
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
-
-        # # only keep most recent poses before updating simulation
-        # self._crowd_poses = list(self._crowd_poses[-1])
-        # self._robot_poses = list(self._robot_poses[-1])
 
         self._take_action(action)
 
@@ -439,7 +432,7 @@ class MengeGym(gym.Env):
         for (robot_pose, crowd_pose) in zip(self._robot_poses, self._crowd_poses):
             rp.logdebug("Robot Pose (Shape %r):\n %r" % (robot_pose.shape, robot_pose))
             rp.logdebug("Crowd Pose (Shape %r):\n %r" % (crowd_pose.shape, crowd_pose))
-            # state = np.concatenate((robot_pose[:, :3], crowd_pose[:, :3]), axis=0)
+
             ped_trackers = self.ped_tracker.update(crowd_pose)
             self.rob_tracker.predict()
             if np.any(robot_pose):
@@ -477,23 +470,21 @@ class MengeGym(gym.Env):
             rp.logwarn("Simulation not paused, service failed")
             self._pub_run.publish(Bool(data=False))
         rp.logdebug("Service called")
-        # wait for response from simulation, in the meantime publish cmd_vel
         counter = 0
-        # while not (self.global_time >= self._prev_time + n_steps * self.config.time_step) \
-        #         and (not self._crowd_poses or not self._robot_poses):
+
         while not self._crowd_poses or not self._robot_poses:
+
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
                 break
 
-            # rp.logdebug("Publishing cmd_vel message")
-            # self._cmd_vel_pub.publish(vel_msg)
             rp.logdebug('Simulation not done yet')
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
             rp.logdebug('#Crowd %d, #Rob %d' %
                         (len(self._crowd_poses), len(self._robot_poses)))
             self._rate.sleep()
             counter += 1
+            rp.logdebug('Counter={}'.format(counter))
             if counter >= 10:
                 raise TimeoutError("Simulator node not responding")
 
@@ -501,13 +492,6 @@ class MengeGym(gym.Env):
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
         self._prev_time = self.global_time
         self._action = None
-
-        # self._pub_run.publish(Bool(data=True))
-        # current_time = start_time = rp.Time.now()
-        # while current_time <= start_time + self._run_duration:
-        #     self._cmd_vel_pub.publish(vel_msg)
-        #     current_time = rp.Time.now()
-        # self._pub_run.publish(Bool(data=False))
 
     def _get_reward_done_info(self) -> (float, bool, object):
         """
@@ -598,6 +582,7 @@ class MengeGym(gym.Env):
                 reward = 0
                 done = False
                 info = Nothing()
+            rp.logdebug('Current reward={} ({})'.format(reward, info))
             return reward, done, info
 
     def reset(self, phase='test', test_case=None):
@@ -639,7 +624,6 @@ class MengeGym(gym.Env):
         rp.sleep(5)
 
         rp.logdebug("Set up subscribers and service proxies")
-        # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
         rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
         rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
         rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
@@ -683,4 +667,3 @@ class MengeGym(gym.Env):
 
         rp.loginfo("Env close - Shutting down simulation process and killing roscore")
         self.roshandle.terminate()
-        # self._sim_process.shutdown()

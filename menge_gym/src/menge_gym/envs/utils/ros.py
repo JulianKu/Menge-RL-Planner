@@ -66,62 +66,6 @@ def marker2array(marker: Marker) -> Tuple[float, float, float, float]:
     return x, y, phi, r
 
 
-def start_roslaunch_file(pkg: str, launchfile: str, launch_cli_args: Dict[str, str] = None) -> subprocess.Popen:
-    """
-    start a ROS launchfile with arguments
-
-    :param pkg: ROS package where launchfile is specified
-    :param launchfile: name of the launch file
-    :param launch_cli_args: dict of additional command line arguments {arg:value}
-
-    :return: process of the launched file
-    """
-
-    # make sure launchfile is provided with extension
-    if not str(launchfile).endswith('.launch'):
-        launchfile += '.launch'
-
-    launch_expr = ["roslaunch", pkg, launchfile]
-
-    if launch_cli_args:
-        # resolve cli arguments
-        for key in launch_cli_args:
-            launch_expr.append(str(key) + ':=' + str(launch_cli_args[key]))
-
-    # launch file
-
-    return subprocess.Popen(launch_expr)
-
-
-# def launch(pkg: str, executable: str, launch_cli_args: Dict[str, str] = None) -> pl.PyRosLaunch:
-#     """
-#     start a ROS node with arguments
-#
-#     :param pkg: ROS package where node is specified
-#     :param executable: name of the node's executable
-#     :param launch_cli_args: dict of additional command line arguments {arg:value}
-#
-#     :return: process of the launched node
-#     """
-#     args = []
-#     if launch_cli_args:
-#         # resolve cli arguments
-#         for key in launch_cli_args:
-#             args.append("-%s %s" % (key, launch_cli_args[key]))
-#
-#     configs = [pl.Node(pkg, executable, executable,
-#                        # output (optional)
-#                        output="screen",
-#                        # passing in args for executable (optional)
-#                        args=" ".join(map(str, args)))
-#                ]
-#
-#     p = pl.PyRosLaunch(configs)
-#     p.start()
-#
-#     return p
-
-
 def isProcessRunning(process_name: str) -> Tuple[bool, int]:
     """
     checks whether a process is already running
@@ -129,16 +73,16 @@ def isProcessRunning(process_name: str) -> Tuple[bool, int]:
     :param process_name:
     :return:
     """
-    core_running = False
+    proc_running = False
     pid = None
     for proc in psutil.process_iter():
         try:
             if process_name in proc.name():
                 pid = proc.pid
-                core_running = True
+                proc_running = True
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
-    return core_running, pid
+    return proc_running, pid
 
 
 def kill_child_processes(parent_pid, sig=SIGTERM):
@@ -169,17 +113,13 @@ class ROSHandle:
 
         # check if "roscore" running already
         self.core_running, self.core_PID = isProcessRunning("roscore")
-        self.core_thread = None
+
         if not self.core_running:
             loginfo("No roscore running yet")
             loginfo("Start new roscore")
             self.core_process = subprocess.Popen(["roscore"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            # self.core_thread = threading.Thread(target=output_reader, args=(self.core_process, self.queue))
-            # self.core_thread.daemon = True
-            # self.core_thread.start()
             self.core_PID = self.core_process.pid
             self.core_running = True
-            # sleep(2)
             self.log_output()
 
     def start_rosnode(self, pkg: str, executable: str, launch_cli_args: Dict[str, str] = None) -> int:
@@ -204,7 +144,6 @@ class ROSHandle:
         thr.daemon = True
         thr.start()
         pid = proc.pid
-        # sleep(5)
         self.log_output()
 
         self.processes[pid] = proc
