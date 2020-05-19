@@ -415,8 +415,6 @@ class MengeGym(gym.Env):
 
         self._take_action(action)
 
-        self.roshandle.log_output()
-
         reward, done, info = self._get_reward_done_info()
 
         if isinstance(info, Timeout) and not (self._robot_poses and self._crowd_poses):

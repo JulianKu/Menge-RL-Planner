@@ -1,13 +1,9 @@
 from geometry_msgs.msg import Pose
 from visualization_msgs.msg import Marker
 import subprocess
-import threading
-import queue
 import psutil
-from time import sleep
-# import pylaunch as pl
 from rospy import loginfo, logdebug, logerr
-from signal import SIGTERM
+from signal import SIGTERM, SIGKILL
 from numpy import arctan2
 from typing import Tuple, Dict
 
@@ -99,17 +95,10 @@ def kill_child_processes(parent_pid, sig=SIGTERM):
         process.send_signal(sig)
 
 
-def output_reader(proc: subprocess.Popen, out_queue: queue.Queue):
-    for line in iter(proc.stdout.readline, b''):
-        # loginfo(out_line.decode('utf-8'))
-        out_queue.put(line.decode('utf-8'))
-
-
 class ROSHandle:
+
     def __init__(self):
         self.processes = {}  # type: Dict[int, subprocess.Popen]
-        self.threads = {}  # type: Dict[int, threading.Thread]
-        self.queue = queue.Queue()
 
         # check if "roscore" running already
         self.core_running, self.core_PID = isProcessRunning("roscore")
@@ -120,7 +109,6 @@ class ROSHandle:
             self.core_process = subprocess.Popen(["roscore"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             self.core_PID = self.core_process.pid
             self.core_running = True
-            self.log_output()
 
     def start_rosnode(self, pkg: str, executable: str, launch_cli_args: Dict[str, str] = None) -> int:
         """
@@ -140,44 +128,22 @@ class ROSHandle:
 
         # run process
         proc = subprocess.Popen(run_expr, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        thr = threading.Thread(target=output_reader, args=(proc, self.queue))
-        thr.daemon = True
-        thr.start()
         pid = proc.pid
-        self.log_output()
 
         self.processes[pid] = proc
-        self.threads[pid] = thr
 
         return pid
-
-    def log_output(self):
-
-        out_queue = self.queue
-        print('--- Start processing queues')
-        while True:
-            try:
-                print(out_queue.get_nowait())
-            except queue.Empty:
-                break
-        print('--- Processing queues done')
 
     def terminate(self):
         """
         terminate all ros processes and the core itself
         """
         loginfo("Trying to kill all launched processes first")
-        for pid, process in self.processes.items():
-            process.terminate()
+        for pid in self.processes.items():
+            process = self.processes.pop(pid)
+            kill_child_processes(pid, SIGKILL)
+            process.kill()
             process.wait()
-            self.threads[pid].join()
-        if self.core_thread:
-            loginfo("Trying to kill further child pids of roscore pid: " + str(self.core_PID))
-            kill_child_processes(self.core_PID)
-            self.core_process.terminate()
-            self.core_process.wait()  # important to prevent from zombie process
-            # self.core_thread.join()
-        self.log_output()
 
     def terminateOne(self, pid):
         """
@@ -187,7 +153,6 @@ class ROSHandle:
         """
         loginfo("trying to kill process with pid: %s" % pid)
         proc = self.processes[pid]
-        proc.terminate()
+        kill_child_processes(pid, SIGKILL)
+        proc.kill()
         proc.wait()
-        self.threads[pid].join()
-        self.log_output()
