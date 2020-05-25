@@ -349,8 +349,8 @@ class MengeGym(gym.Env):
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
-        # transform MarkerArray message to numpy array
-        marker_array = np.array(list(map(marker2array, msg.markers)))
+        # transform MarkerArray message to numpy array (skip first marker as this is the "delete markers" action)
+        marker_array = np.array(list(map(marker2array, msg.markers[1:])))
         self._crowd_poses.append(marker_array.reshape(-1, 4))
 
     def _static_obstacle_callback(self, msg: PoseArray):

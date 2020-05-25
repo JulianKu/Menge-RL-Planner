@@ -50,7 +50,6 @@ class Explorer(object):
             actions = []
             rewards = []
             while not done:
-                # TODO: check if can work with only "ob" instead of "JointState(robot.get_full_state(), ob)"
                 action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
                 states.append(self.robot.policy.last_state)
