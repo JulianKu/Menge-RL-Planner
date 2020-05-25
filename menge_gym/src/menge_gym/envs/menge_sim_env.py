@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
 from std_msgs.msg import Bool, Float32
-from menge_srv.srv import RunSim, CmdVel, CmdVelResponse
+from menge_srv.srv import CmdVel, CmdVelResponse, SimState, SimStateRequest, SimStateResponse
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
 from .utils.ros import obstacle2array, marker2array, ROSHandle
@@ -100,7 +100,7 @@ class MengeGym(gym.Env):
         self.global_time = None
         self._prev_time = None
         self._cmd_vel_srv = None
-        self._advance_sim_srv = None
+        self._get_sim_state_srv = None
         self.config.ros_rate = None
         self._rate = None
 
@@ -474,14 +474,29 @@ class MengeGym(gym.Env):
                 rp.logdebug("Publishing step")
                 self._pub_step.publish(Bool(data=True))
 
-            rp.logdebug('Simulation not done yet')
+            sim_state = SimStateResponse()
+            try:
+                rp.logdebug("Waiting for service")
+                rp.wait_for_service('get_sim_state')
+                get_sim_state_srv = rp.ServiceProxy("get_sim_state", SimState)
+                rp.logdebug("Calling service")
+                req = SimStateRequest()
+                sim_state = get_sim_state_srv.call(req)  # type: SimStateResponse
+                rp.logdebug("Processing response")
+                self._robot_pose_callback(sim_state.robot_pose)
+                self._crowd_expansion_callback(sim_state.crowd_expansion)
+                self._static_obstacle_callback(sim_state.static_obs)
+            except rp.ServiceException as exc:
+                print("Service did not process request: " + str(exc))
+
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
+            rp.logdebug('Service Sim Time %.3f' % sim_state.sim_time.data)
             rp.logdebug('#Crowd %d, #Rob %d' %
                         (len(self._crowd_poses), len(self._robot_poses)))
             self._rate.sleep()
             counter += 1
             rp.logdebug('Counter={}'.format(counter))
-            if counter >= 10:
+            if counter >= 100:
                 raise TimeoutError("Simulator node not responding")
 
         rp.logdebug('Simulation step(s) done')
@@ -619,12 +634,11 @@ class MengeGym(gym.Env):
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(5)
 
-        rp.logdebug("Set up subscribers and service proxies")
-        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
-        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
-        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
+        rp.logdebug("Set up subscribers")
+        # rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
+        # rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
+        # rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
         rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50)
-        self._advance_sim_srv = rp.ServiceProxy('advance_simulation', RunSim)
 
         # Sample new goal
         self.sample_goal(exclude_initial=True)
