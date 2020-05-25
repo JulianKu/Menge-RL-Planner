@@ -96,7 +96,7 @@ class MengeGym(gym.Env):
         # ROS
         self.roshandle = None
         self._sim_pid = None
-        self._pub_run = None
+        self._pub_step = None
         self.global_time = None
         self._prev_time = None
         self._cmd_vel_srv = None
@@ -341,9 +341,7 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_run = rp.Publisher('run', Bool, queue_size=1)
-
-        # self._cmd_vel_pub = rp.Publisher('/cmd_vel', Twist, queue_size=50)
+        self._pub_step = rp.Publisher('step', Bool, queue_size=1)
         self._cmd_vel_srv = rp.Service('cmd_vel_srv', CmdVel, self._cmd_vel_srv_handler)
 
         # initialize time
@@ -457,24 +455,24 @@ class MengeGym(gym.Env):
 
         self._action = action
 
-        rp.logdebug("Calling Service")
-
-        # Not sure why, but advance_sim service kept getting stuck (not reaching simulator node)
-        # sleep is a working hack around this, not nice though
-        self._rate.sleep()
         # advance simulation by n steps (n=1)
         n_steps = 1
-        while not self._advance_sim_srv(n_steps):
-            rp.logwarn("Simulation not paused, service failed")
-            self._pub_run.publish(Bool(data=False))
-        rp.logdebug("Service called")
+        target_time = self._prev_time + n_steps * self.config.time_step
+
+        # wait for response from simulation
         counter = 0
 
         while not self._crowd_poses or not self._robot_poses:
 
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
+                rp.logdebug("Simulation reached time limit")
                 break
+            # advance simulation
+            if self.global_time < target_time:
+                rp.logdebug('Simulation not done yet')
+                rp.logdebug("Publishing step")
+                self._pub_step.publish(Bool(data=True))
 
             rp.logdebug('Simulation not done yet')
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
@@ -595,7 +593,7 @@ class MengeGym(gym.Env):
         if test_case is not None:
             self.case_counter[phase] = test_case
         self.global_time = 0.0
-        self._prev_time = -1
+        self._prev_time = 0
 
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
