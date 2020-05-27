@@ -481,8 +481,11 @@ class MengeGym(gym.Env):
                         (len(self._crowd_poses), len(self._robot_poses)))
             counter += 1
             rp.logdebug('Counter={}'.format(counter))
-            if counter >= 100:
-                raise TimeoutError("Simulator node not responding")
+            if counter >= 10:
+                # raise TimeoutError("Simulator node not responding")
+                rp.logerr("Timeout reached, setting empty poses")
+                self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
+                self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
 
             rp.sleep(rp.Duration.from_sec(0.02))
 
@@ -518,14 +521,14 @@ class MengeGym(gym.Env):
             robot_radius = self.config.robot_radius
             goal = self.goal
 
-            if np.any(recent_crowd_pose):
+            if np.any(recent_crowd_pose) and np.any(recent_robot_pose):
                 crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
                 crowd_distances -= recent_crowd_pose[:, -1]
                 crowd_distances -= robot_radius
             else:
                 crowd_distances = np.array([])
 
-            if np.any(obstacle_position):
+            if np.any(obstacle_position) and np.any(recent_robot_pose):
                 obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
                 obstacle_distances -= robot_radius
             else:
@@ -545,7 +548,10 @@ class MengeGym(gym.Env):
             else:
                 d_min_obstacle = obstacle_distances.min()
 
-            d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+            if np.any(recent_robot_pose):
+                d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+            else:
+                d_goal = np.inf
 
             # collision with crowd
             if d_min_crowd < 0:
