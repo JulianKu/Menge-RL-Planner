@@ -162,9 +162,6 @@ class MengeGym(gym.Env):
                         self.config.robot_config['end_angle'] = config.robot.fov / 2
                     elif param == 'sensor_resolution':
                         self.config.robot_config['increment'] = config.robot.sensor_resolution
-                if self.config.robot_kinematics == 'single_track':
-                    self.robot_motion_model = ModifiedAckermannModel(self.config.robot_length,
-                                                                     self.config.robot_lf_ratio)
                 kwargs = {}
                 if hasattr(config.sim, 'human_num'):
                     kwargs['num_agents'] = config.sim.human_num
@@ -214,6 +211,10 @@ class MengeGym(gym.Env):
             self.config.robot_length = config.robot.length
         if hasattr(config.robot, 'lf_ratio'):
             self.config.robot_lf_ratio = config.robot.lf_ratio
+        # set motion model if available
+        if self.config.robot_kinematics == 'single_track':
+            self.robot_motion_model = ModifiedAckermannModel(self.config.robot_length,
+                                                             self.config.robot_lf_ratio, timestep=self.config.time_step)
 
         # action space
         # from paper RGL for CrowdNav --> 6 speeds [0, v_pref] and 16 headings [0, 2*pi)
