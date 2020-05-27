@@ -139,11 +139,12 @@ class ROSHandle:
         terminate all ros processes and the core itself
         """
         loginfo("Trying to kill all launched processes first")
-        for pid in self.processes.items():
-            process = self.processes.pop(pid)
+        for pid in self.processes:
+            process = self.processes[pid]
             kill_child_processes(pid, SIGKILL)
             process.kill()
             process.wait()
+        self.processes = {}
 
     def terminateOne(self, pid):
         """
@@ -152,7 +153,7 @@ class ROSHandle:
         :param pid: process id for process to kill
         """
         loginfo("trying to kill process with pid: %s" % pid)
-        proc = self.processes[pid]
+        proc = self.processes.pop(pid)
         kill_child_processes(pid, SIGKILL)
         proc.kill()
         proc.wait()
