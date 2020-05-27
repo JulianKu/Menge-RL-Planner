@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
 from std_msgs.msg import Bool, Float32
-from menge_srv.srv import CmdVel, CmdVelResponse, SimState, SimStateRequest, SimStateResponse
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
 from .utils.ros import obstacle2array, marker2array, ROSHandle
@@ -97,10 +96,9 @@ class MengeGym(gym.Env):
         self.roshandle = None
         self._sim_pid = None
         self._pub_step = None
+        self._pub_cmd_vel = None
         self.global_time = None
         self._prev_time = None
-        self._cmd_vel_srv = None
-        self._get_sim_state_srv = None
         self.config.ros_rate = None
         self._rate = None
 
@@ -343,7 +341,7 @@ class MengeGym(gym.Env):
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
         self._pub_step = rp.Publisher('step', Bool, queue_size=1)
-        self._cmd_vel_srv = rp.Service('cmd_vel_srv', CmdVel, self._cmd_vel_srv_handler)
+        self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, latch=True)
 
         # initialize time
         self._rate = rp.Rate(self.config.ros_rate)
@@ -353,11 +351,13 @@ class MengeGym(gym.Env):
         # transform MarkerArray message to numpy array (skip first marker as this is the "delete markers" action)
         marker_array = np.array(list(map(marker2array, msg.markers[1:])))
         self._crowd_poses.append(marker_array.reshape(-1, 4))
+        rp.logdebug('Crowd callback done')
 
     def _static_obstacle_callback(self, msg: PoseArray):
         rp.logdebug('Static Obstacle subscriber callback called')
         # transform PoseArray message to numpy array
         self._static_obstacles = np.array(list(map(obstacle2array, msg.poses))).reshape(-1, 2)
+        rp.logdebug('Static Obs callback done')
 
     def _robot_pose_callback(self, msg: PoseStamped):
         rp.logdebug('Robot Pose subscriber callback called')
@@ -369,13 +369,13 @@ class MengeGym(gym.Env):
 
         # update list of robot poses + pointer to current position
         self._robot_poses.append(np.array([robot_x, robot_y, robot_omega, self.config.robot_radius]).reshape(-1, 4))
+        rp.logdebug('Robot Pose callback done')
 
     def _sim_time_callback(self, msg: Float32):
         rp.logdebug('Time message received')
         self.global_time = msg.data
 
-    def _cmd_vel_srv_handler(self, request):
-        rp.logdebug('Command Velocity service requested')
+    def _cmd_vel_pub(self):
 
         action = self._action
         if action is not None and hasattr(self.observation, 'robot_state'):
@@ -396,18 +396,18 @@ class MengeGym(gym.Env):
 
             rp.logdebug('Setting action with vel={:.2f} and steering angle={:.2f}'.format(velocity_action,
                                                                                           steering_angle_action))
-
-            cmd_vel_msg = Twist()
-            cmd_vel_msg.linear.x = velocity_action
-            cmd_vel_msg.linear.y = 0
-            cmd_vel_msg.linear.z = 0
-            cmd_vel_msg.angular.x = 0
-            cmd_vel_msg.angular.y = 0
-            cmd_vel_msg.angular.z = steering_angle_action
-            return CmdVelResponse(True, cmd_vel_msg)
         else:
-            rp.logdebug('Setting no action')
-            return CmdVelResponse(False, Twist())
+            velocity_action = 0
+            steering_angle_action = 0
+
+        cmd_vel_msg = Twist()
+        cmd_vel_msg.linear.x = velocity_action
+        cmd_vel_msg.linear.y = 0
+        cmd_vel_msg.linear.z = 0
+        cmd_vel_msg.angular.x = 0
+        cmd_vel_msg.angular.y = 0
+        cmd_vel_msg.angular.z = steering_angle_action
+        self._pub_cmd_vel.publish(cmd_vel_msg)
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
@@ -473,32 +473,18 @@ class MengeGym(gym.Env):
             if self.global_time < target_time:
                 rp.logdebug('Simulation not done yet')
                 rp.logdebug("Publishing step")
+                self._cmd_vel_pub()
                 self._pub_step.publish(Bool(data=True))
 
-            sim_state = SimStateResponse()
-            try:
-                rp.logdebug("Waiting for service")
-                rp.wait_for_service('get_sim_state')
-                get_sim_state_srv = rp.ServiceProxy("get_sim_state", SimState)
-                rp.logdebug("Calling service")
-                req = SimStateRequest()
-                sim_state = get_sim_state_srv.call(req)  # type: SimStateResponse
-                rp.logdebug("Processing response")
-                self._robot_pose_callback(sim_state.robot_pose)
-                self._crowd_expansion_callback(sim_state.crowd_expansion)
-                self._static_obstacle_callback(sim_state.static_obs)
-            except rp.ServiceException as exc:
-                print("Service did not process request: " + str(exc))
-
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
-            rp.logdebug('Service Sim Time %.3f' % sim_state.sim_time.data)
             rp.logdebug('#Crowd %d, #Rob %d' %
                         (len(self._crowd_poses), len(self._robot_poses)))
-            self._rate.sleep()
             counter += 1
             rp.logdebug('Counter={}'.format(counter))
             if counter >= 100:
                 raise TimeoutError("Simulator node not responding")
+
+            rp.sleep(rp.Duration.from_sec(0.02))
 
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
@@ -636,9 +622,9 @@ class MengeGym(gym.Env):
         rp.sleep(5)
 
         rp.logdebug("Set up subscribers")
-        # rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
-        # rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
-        # rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
+        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
+        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
+        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
         rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50)
 
         # Sample new goal
