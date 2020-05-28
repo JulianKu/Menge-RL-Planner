@@ -29,7 +29,7 @@ class BaseEnvConfig(object):
     reward.clearance_dist_penalty_factor = 0.5
 
     sim = Config()
-    sim.scenario = '/home/julian/Desktop/test_data/test.xml'
+    sim.scenario = '/home/ros/test_data/test.xml'
     sim.human_num = 30
     sim.randomize_attributes = True
 
