@@ -1,2 +1,3 @@
 [submodule "Python-RVO2"]
+    path = Python-RVO2
 	url = https://github.com/JulianKu/Python-RVO2.git
