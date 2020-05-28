@@ -168,7 +168,7 @@ install(
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 install(
-  PROGRAMS src/envs/menge_sim_env.py
+  PROGRAMS src/menge_gym/envs/menge_sim_env.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
