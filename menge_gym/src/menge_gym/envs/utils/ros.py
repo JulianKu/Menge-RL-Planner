@@ -228,10 +228,12 @@ class ROSHandle:
         terminate all ros processes and the core itself
         """
         loginfo("Trying to kill all launched processes first")
-        for pid, process in self.processes.items():
+        for pid in self.processes:
+            process = self.processes[pid]
             process.terminate()
             process.wait()
-            self.threads[pid].join()
+            thread = self.threads.pop(pid)
+            thread.join()
         if self.core_thread:
             loginfo("Trying to kill further child pids of roscore pid: " + str(self.core_PID))
             kill_child_processes(self.core_PID)
@@ -239,6 +241,9 @@ class ROSHandle:
             self.core_process.wait()  # important to prevent from zombie process
             # self.core_thread.join()
         self.log_output()
+        self.processes = {}
+        self.core_process = None
+        self.core_thread = None
 
     def terminateOne(self, pid):
         """
@@ -247,8 +252,9 @@ class ROSHandle:
         :param pid: process id for process to kill
         """
         loginfo("trying to kill process with pid: %s" % pid)
-        proc = self.processes[pid]
+        proc = self.processes.pop(pid)
         proc.terminate()
         proc.wait()
-        self.threads[pid].join()
+        thread = self.threads.pop(pid)
+        thread.join()
         self.log_output()

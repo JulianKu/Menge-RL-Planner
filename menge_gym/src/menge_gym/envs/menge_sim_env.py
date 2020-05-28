@@ -163,9 +163,7 @@ class MengeGym(gym.Env):
                         self.config.robot_config['end_angle'] = config.robot.fov / 2
                     elif param == 'sensor_resolution':
                         self.config.robot_config['increment'] = config.robot.sensor_resolution
-                if self.config.robot_kinematics == 'single_track':
-                    self.robot_motion_model = ModifiedAckermannModel(self.config.robot_length,
-                                                                     self.config.robot_lf_ratio)
+                
                 kwargs = {}
                 if hasattr(config.sim, 'human_num'):
                     kwargs['num_agents'] = config.sim.human_num
@@ -215,6 +213,10 @@ class MengeGym(gym.Env):
             self.config.robot_length = config.robot.length
         if hasattr(config.robot, 'lf_ratio'):
             self.config.robot_lf_ratio = config.robot.lf_ratio
+        # set motion model if available
+        if self.config.robot_kinematics == 'single_track':
+            self.robot_motion_model = ModifiedAckermannModel(self.config.robot_length,
+                                                             self.config.robot_lf_ratio, timestep=self.config.time_step)
 
         # action space
         # from paper RGL for CrowdNav --> 6 speeds [0, v_pref] and 16 headings [0, 2*pi)
@@ -358,8 +360,8 @@ class MengeGym(gym.Env):
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
-        # transform MarkerArray message to numpy array
-        marker_array = np.array(list(map(marker2array, msg.markers)))
+        # transform MarkerArray message to numpy array (skip first marker as this is the "delete markers" action)
+        marker_array = np.array(list(map(marker2array, msg.markers[1:])))
         self._crowd_poses.append(marker_array.reshape(-1, 4))
 
     def _static_obstacle_callback(self, msg: PoseArray):
@@ -386,7 +388,7 @@ class MengeGym(gym.Env):
         rp.logdebug('Command Velocity service requested')
 
         action = self._action
-        if action is not None:
+        if action is not None and hasattr(self.observation, "robot_state"):
             robot_state = self.observation.robot_state
             velocity_action = self._velocities[action[0]]
             steering_angle_action = self._angles[action[1]]
@@ -536,14 +538,14 @@ class MengeGym(gym.Env):
             robot_radius = self.config.robot_radius
             goal = self.goal
 
-            if np.any(recent_crowd_pose):
+            if np.any(recent_crowd_pose) and np.any(recent_robot_pose):
                 crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
                 crowd_distances -= recent_crowd_pose[:, -1]
                 crowd_distances -= robot_radius
             else:
                 crowd_distances = np.array([])
 
-            if np.any(obstacle_position):
+            if np.any(obstacle_position) and np.any(recent_robot_pose):
                 obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
                 obstacle_distances -= robot_radius
             else:
@@ -563,7 +565,10 @@ class MengeGym(gym.Env):
             else:
                 d_min_obstacle = obstacle_distances.min()
 
-            d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+            if np.any(recent_robot_pose):
+                d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+            else:
+                d_goal = np.inf
 
             # collision with crowd
             if d_min_crowd < 0:

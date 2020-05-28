@@ -10,22 +10,27 @@ def obstacles2segments(obstacles, d_min=0.1):
     """
     connects consecutive obstacle points close to each other (distance <= d_min) to obstacle segments.
     """
-    dist = np.linalg.norm(obstacles.position[:-1] - obstacles.position[1:], axis=1)
-    # new segment begins where distance between two consecutive obstacle positions becomes to large (> d_min)
-    mask = dist > d_min
     obstacle_segments = []
     segments = []
     seg_count = 0
-    # create array that tells which segment an obstacle belongs to
-    for new_segment in mask:
+
+    if obstacles:
+        dist = np.linalg.norm(obstacles.position[:-1] - obstacles.position[1:], axis=1)
+        # new segment begins where distance between two consecutive obstacle positions becomes to large (> d_min)
+        mask = dist > d_min
+        obstacle_segments = []
+        segments = []
+        seg_count = 0
+        # create array that tells which segment an obstacle belongs to
+        for new_segment in mask:
+            obstacle_segments.append(seg_count)
+            seg_count += 1 if new_segment else 0
         obstacle_segments.append(seg_count)
-        seg_count += 1 if new_segment else 0
-    obstacle_segments.append(seg_count)
-    obstacle_segments = np.array(obstacle_segments)
-    # merge all obstacle positions from same segment into single obstacle
-    for segment_idx in np.unique(obstacle_segments):
-        obstacle_segment = obstacles.position[np.where(obstacle_segments == segment_idx)[0]]
-        segments.append(list(map(tuple, obstacle_segment)))
+        obstacle_segments = np.array(obstacle_segments)
+        # merge all obstacle positions from same segment into single obstacle
+        for segment_idx in np.unique(obstacle_segments):
+            obstacle_segment = obstacles.position[np.where(obstacle_segments == segment_idx)[0]]
+            segments.append(list(map(tuple, obstacle_segment)))
     return segments
 
 
