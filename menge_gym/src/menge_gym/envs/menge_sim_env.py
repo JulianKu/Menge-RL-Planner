@@ -340,8 +340,8 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_step = rp.Publisher('step', Bool, queue_size=1)
-        self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, latch=True)
+        self._pub_step = rp.Publisher('step', Bool, queue_size=1, tcp_nodelay=True)
+        self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
 
         # initialize time
         self._rate = rp.Rate(self.config.ros_rate)
@@ -628,10 +628,10 @@ class MengeGym(gym.Env):
         rp.sleep(5)
 
         rp.logdebug("Set up subscribers")
-        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
-        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
-        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
-        rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50)
+        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50, tcp_nodelay=True)
+        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50, tcp_nodelay=True)
+        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50, tcp_nodelay=True)
+        rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
 
         # Sample new goal
         self.sample_goal(exclude_initial=True)
