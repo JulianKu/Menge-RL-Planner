@@ -381,32 +381,28 @@ class MengeGym(gym.Env):
         if action is not None and hasattr(self.observation, 'robot_state'):
             robot_state = self.observation.robot_state
             velocity_action = self._velocities[action[0]]
-            steering_angle_action = self._angles[action[1]]
+            angle_action = self._angles[action[1]]
 
             if isinstance(self.robot_motion_model, ModifiedAckermannModel):
                 # transform front wheel velocity and steering angle into center velocity and center velocity angle
                 self.robot_motion_model.setPose(robot_state.position, robot_state.orientation[0])
-                self.robot_motion_model.computeNextPosition(np.array((velocity_action, steering_angle_action)))
+                self.robot_motion_model.computeNextPosition(np.array((velocity_action, angle_action)))
                 center_velocity_components = self.robot_motion_model.center_velocity_components
                 velocity_action = np.linalg.norm(center_velocity_components)
-                steering_angle_action = np.arctan2(*center_velocity_components)
-            elif self.robot_motion_model is None:
-                # in menge_ros the published angle defines the absolute angle based on map coordinate system
-                steering_angle_action += robot_state.orientation[0]
+                angle_action = np.arctan2(center_velocity_components[1], center_velocity_components[0])
+
+            # in menge_ros the published angle defines the relative angle based on the agent's orientation
+            angle_action -= robot_state.orientation[0]
 
             rp.logdebug('Setting action with vel={:.2f} and steering angle={:.2f}'.format(velocity_action,
-                                                                                          steering_angle_action))
+                                                                                          angle_action))
         else:
             velocity_action = 0
-            steering_angle_action = 0
+            angle_action = 0
 
         cmd_vel_msg = Twist()
         cmd_vel_msg.linear.x = velocity_action
-        cmd_vel_msg.linear.y = 0
-        cmd_vel_msg.linear.z = 0
-        cmd_vel_msg.angular.x = 0
-        cmd_vel_msg.angular.y = 0
-        cmd_vel_msg.angular.z = steering_angle_action
+        cmd_vel_msg.angular.z = angle_action
         self._pub_cmd_vel.publish(cmd_vel_msg)
 
     def step(self, action: np.ndarray):
