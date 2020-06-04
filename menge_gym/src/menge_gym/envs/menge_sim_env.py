@@ -356,12 +356,19 @@ class MengeGym(gym.Env):
         rp.logdebug('Robot Pose subscriber callback called')
         # extract 2D pose and orientation from message
         robot_pose = msg.pose
-        robot_x = robot_pose.position.x
-        robot_y = robot_pose.position.y
-        robot_omega = 2 * np.arccos(robot_pose.orientation.w)
+        x = robot_pose.position.x
+        y = robot_pose.position.y
+        # orientation quaternion
+        q_z = robot_pose.orientation.z
+        q_w = robot_pose.orientation.w
+        phi = np.arctan2(2 * q_w * q_z, 1 - 2 * q_z * q_z)
+        if phi < -np.pi:
+            phi += 2*np.pi
+        elif phi > np.pi:
+            phi -= 2*np.pi
 
         # update list of robot poses + pointer to current position
-        self._robot_poses.append(np.array([robot_x, robot_y, robot_omega, self.config.robot_radius]).reshape(-1, 4))
+        self._robot_poses.append(np.array([x, y, phi, self.config.robot_radius]).reshape(-1, 4))
         rp.logdebug('Robot Pose callback done')
 
     def _sim_time_callback(self, msg: Float32):
