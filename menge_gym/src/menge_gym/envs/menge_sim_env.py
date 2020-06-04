@@ -8,7 +8,7 @@ import rospy as rp
 import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import UInt8, Float32
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
 from .utils.ros import obstacle2array, marker2array, ROSHandle
@@ -99,8 +99,6 @@ class MengeGym(gym.Env):
         self._pub_cmd_vel = None
         self.global_time = None
         self._prev_time = None
-        self.config.ros_rate = None
-        self._rate = None
 
         # Random Seed
         self.seed = None
@@ -251,8 +249,6 @@ class MengeGym(gym.Env):
                           'test': config.env.test_size}
         self.case_counter = {'train': 0, 'test': 0, 'val': 0}
 
-        self.config.ros_rate = config.ros.rate
-
     def _initialize_from_scenario(self):
         scenario_xml = self.config.scenario_xml
         scenario_dir = path.split(scenario_xml)[0]
@@ -340,11 +336,8 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_step = rp.Publisher('step', Bool, queue_size=1, tcp_nodelay=True)
+        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True)
         self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
-
-        # initialize time
-        self._rate = rp.Rate(self.config.ros_rate)
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
@@ -463,18 +456,21 @@ class MengeGym(gym.Env):
         # wait for response from simulation
         counter = 0
 
+        self._cmd_vel_pub()
         while not self._crowd_poses or not self._robot_poses:
 
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
                 rp.logdebug("Simulation reached time limit")
                 break
+
             # advance simulation
-            if self.global_time < target_time:
+            time_diff = target_time - self.global_time
+            if time_diff > 0:
                 rp.logdebug('Simulation not done yet')
-                rp.logdebug("Publishing step")
-                self._cmd_vel_pub()
-                self._pub_step.publish(Bool(data=True))
+                
+                rp.logdebug("Publishing {} steps".format(n_steps))
+                self._pub_step.publish(UInt8(data=n_steps))
 
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
             rp.logdebug('#Crowd %d, #Rob %d' %
@@ -486,8 +482,6 @@ class MengeGym(gym.Env):
                 rp.logerr("Timeout reached, setting empty poses")
                 self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
                 self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
-
-            rp.sleep(rp.Duration.from_sec(0.02))
 
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
