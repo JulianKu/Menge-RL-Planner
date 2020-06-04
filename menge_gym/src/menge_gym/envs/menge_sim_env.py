@@ -5,15 +5,13 @@ from gym import spaces
 import numpy as np
 from os import path
 import rospy as rp
-import rosnode
 import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist
 from visualization_msgs.msg import MarkerArray
-from std_msgs.msg import Bool, Float32
-from menge_srv.srv import RunSim, CmdVel, CmdVelResponse
+from std_msgs.msg import UInt8, Float32
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
-from .utils.ros import obstacle2array, marker2array, ROSHandle  # ,pose2array, launch
+from .utils.ros import obstacle2array, marker2array, ROSHandle
 from .utils.params import goal2array, get_robot_initial_position, parseXML
 from .utils.info import *
 from .utils.tracking import Sort, KalmanTracker
@@ -97,13 +95,10 @@ class MengeGym(gym.Env):
         # ROS
         self.roshandle = None
         self._sim_pid = None
-        self._pub_run = None
+        self._pub_step = None
+        self._pub_cmd_vel = None
         self.global_time = None
         self._prev_time = None
-        self._cmd_vel_srv = None
-        self._advance_sim_srv = None
-        self.config.ros_rate = None
-        self._rate = None
 
         # Random Seed
         self.seed = None
@@ -163,7 +158,6 @@ class MengeGym(gym.Env):
                         self.config.robot_config['end_angle'] = config.robot.fov / 2
                     elif param == 'sensor_resolution':
                         self.config.robot_config['increment'] = config.robot.sensor_resolution
-                
                 kwargs = {}
                 if hasattr(config.sim, 'human_num'):
                     kwargs['num_agents'] = config.sim.human_num
@@ -255,8 +249,6 @@ class MengeGym(gym.Env):
                           'test': config.env.test_size}
         self.case_counter = {'train': 0, 'test': 0, 'val': 0}
 
-        self.config.ros_rate = config.ros.rate
-
     def _initialize_from_scenario(self):
         scenario_xml = self.config.scenario_xml
         scenario_dir = path.split(scenario_xml)[0]
@@ -344,87 +336,79 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_run = rp.Publisher('run', Bool, queue_size=1)
-
-        # self._cmd_vel_pub = rp.Publisher('/cmd_vel', Twist, queue_size=50)
-        self._cmd_vel_srv = rp.Service('cmd_vel_srv', CmdVel, self._cmd_vel_srv_handler)
-
-        # initialize time
-        self._rate = rp.Rate(self.config.ros_rate)
-
-    # def _crowd_pose_callback(self, msg: PoseArray):
-    #     rp.logdebug('Crowd Pose subscriber callback called')
-    #     # transform PoseArray message to numpy array
-    #     pose_array = np.array(list(map(pose2array, msg.poses)))
-    #     self._crowd_poses.append(pose_array)
+        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True)
+        self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
         # transform MarkerArray message to numpy array (skip first marker as this is the "delete markers" action)
         marker_array = np.array(list(map(marker2array, msg.markers[1:])))
         self._crowd_poses.append(marker_array.reshape(-1, 4))
+        rp.logdebug('Crowd callback done')
 
     def _static_obstacle_callback(self, msg: PoseArray):
         rp.logdebug('Static Obstacle subscriber callback called')
         # transform PoseArray message to numpy array
         self._static_obstacles = np.array(list(map(obstacle2array, msg.poses))).reshape(-1, 2)
+        rp.logdebug('Static Obs callback done')
 
     def _robot_pose_callback(self, msg: PoseStamped):
         rp.logdebug('Robot Pose subscriber callback called')
         # extract 2D pose and orientation from message
         robot_pose = msg.pose
-        robot_x = robot_pose.position.x
-        robot_y = robot_pose.position.y
-        robot_omega = 2 * np.arccos(robot_pose.orientation.w)
+        x = robot_pose.position.x
+        y = robot_pose.position.y
+        # orientation quaternion
+        q_z = robot_pose.orientation.z
+        q_w = robot_pose.orientation.w
+        phi = np.arctan2(2 * q_w * q_z, 1 - 2 * q_z * q_z)
+        if phi < -np.pi:
+            phi += 2*np.pi
+        elif phi > np.pi:
+            phi -= 2*np.pi
 
         # update list of robot poses + pointer to current position
-        self._robot_poses.append(np.array([robot_x, robot_y, robot_omega, self.config.robot_radius]).reshape(-1, 4))
+        self._robot_poses.append(np.array([x, y, phi, self.config.robot_radius]).reshape(-1, 4))
+        rp.logdebug('Robot Pose callback done')
 
     def _sim_time_callback(self, msg: Float32):
         rp.logdebug('Time message received')
         self.global_time = msg.data
 
-    def _cmd_vel_srv_handler(self, request):
-        rp.logdebug('Command Velocity service requested')
+    def _cmd_vel_pub(self):
 
         action = self._action
-        if action is not None and hasattr(self.observation, "robot_state"):
+        if action is not None and hasattr(self.observation, 'robot_state'):
             robot_state = self.observation.robot_state
             velocity_action = self._velocities[action[0]]
-            steering_angle_action = self._angles[action[1]]
+            angle_action = self._angles[action[1]]
 
             if isinstance(self.robot_motion_model, ModifiedAckermannModel):
                 # transform front wheel velocity and steering angle into center velocity and center velocity angle
                 self.robot_motion_model.setPose(robot_state.position, robot_state.orientation[0])
-                self.robot_motion_model.computeNextPosition(np.array((velocity_action, steering_angle_action)))
+                self.robot_motion_model.computeNextPosition(np.array((velocity_action, angle_action)))
                 center_velocity_components = self.robot_motion_model.center_velocity_components
                 velocity_action = np.linalg.norm(center_velocity_components)
-                steering_angle_action = np.arctan2(*center_velocity_components)
-            elif self.robot_motion_model is None:
-                # in menge_ros the published angle defines the absolute angle based on map coordinate system
-                steering_angle_action += robot_state.orientation[0]
+                angle_action = np.arctan2(center_velocity_components[1], center_velocity_components[0])
 
-            cmd_vel_msg = Twist()
-            cmd_vel_msg.linear.x = velocity_action
-            cmd_vel_msg.linear.y = 0
-            cmd_vel_msg.linear.z = 0
-            cmd_vel_msg.angular.x = 0
-            cmd_vel_msg.angular.y = 0
-            cmd_vel_msg.angular.z = steering_angle_action
-            return CmdVelResponse(True, cmd_vel_msg)
+            # in menge_ros the published angle defines the relative angle based on the agent's orientation
+            angle_action -= robot_state.orientation[0]
+
+            rp.logdebug('Setting action with vel={:.2f} and steering angle={:.2f}'.format(velocity_action,
+                                                                                          angle_action))
         else:
-            return CmdVelResponse(False, Twist())
+            velocity_action = 0
+            angle_action = 0
+
+        cmd_vel_msg = Twist()
+        cmd_vel_msg.linear.x = velocity_action
+        cmd_vel_msg.angular.z = angle_action
+        self._pub_cmd_vel.publish(cmd_vel_msg)
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
 
-        # # only keep most recent poses before updating simulation
-        # self._crowd_poses = list(self._crowd_poses[-1])
-        # self._robot_poses = list(self._robot_poses[-1])
-
         self._take_action(action)
-
-        self.roshandle.log_output()
 
         reward, done, info = self._get_reward_done_info()
 
@@ -441,7 +425,7 @@ class MengeGym(gym.Env):
         for (robot_pose, crowd_pose) in zip(self._robot_poses, self._crowd_poses):
             rp.logdebug("Robot Pose (Shape %r):\n %r" % (robot_pose.shape, robot_pose))
             rp.logdebug("Crowd Pose (Shape %r):\n %r" % (crowd_pose.shape, crowd_pose))
-            # state = np.concatenate((robot_pose[:, :3], crowd_pose[:, :3]), axis=0)
+
             ped_trackers = self.ped_tracker.update(crowd_pose)
             self.rob_tracker.predict()
             if np.any(robot_pose):
@@ -468,48 +452,44 @@ class MengeGym(gym.Env):
 
         self._action = action
 
-        rp.logdebug("Calling Service")
-
-        # Not sure why, but advance_sim service kept getting stuck (not reaching simulator node)
-        # sleep is a working hack around this, not nice though
-        self._rate.sleep()
         # advance simulation by n steps (n=1)
         n_steps = 1
-        while not self._advance_sim_srv(n_steps):
-            rp.logwarn("Simulation not paused, service failed")
-            self._pub_run.publish(Bool(data=False))
-        rp.logdebug("Service called")
-        # wait for response from simulation, in the meantime publish cmd_vel
+        target_time = self._prev_time + n_steps * self.config.time_step
+
+        # wait for response from simulation
         counter = 0
-        # while not (self.global_time >= self._prev_time + n_steps * self.config.time_step) \
-        #         and (not self._crowd_poses or not self._robot_poses):
+
+        self._cmd_vel_pub()
         while not self._crowd_poses or not self._robot_poses:
+
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
+                rp.logdebug("Simulation reached time limit")
                 break
 
-            # rp.logdebug("Publishing cmd_vel message")
-            # self._cmd_vel_pub.publish(vel_msg)
-            rp.logdebug('Simulation not done yet')
+            # advance simulation
+            time_diff = target_time - self.global_time
+            if time_diff > 0:
+                rp.logdebug('Simulation not done yet')
+                
+                rp.logdebug("Publishing {} steps".format(n_steps))
+                self._pub_step.publish(UInt8(data=n_steps))
+
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
             rp.logdebug('#Crowd %d, #Rob %d' %
                         (len(self._crowd_poses), len(self._robot_poses)))
-            self._rate.sleep()
             counter += 1
+            rp.logdebug('Counter={}'.format(counter))
             if counter >= 10:
-                raise TimeoutError("Simulator node not responding")
+                # raise TimeoutError("Simulator node not responding")
+                rp.logerr("Timeout reached, setting empty poses")
+                self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
+                self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
 
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
         self._prev_time = self.global_time
         self._action = None
-
-        # self._pub_run.publish(Bool(data=True))
-        # current_time = start_time = rp.Time.now()
-        # while current_time <= start_time + self._run_duration:
-        #     self._cmd_vel_pub.publish(vel_msg)
-        #     current_time = rp.Time.now()
-        # self._pub_run.publish(Bool(data=False))
 
     def _get_reward_done_info(self) -> (float, bool, object):
         """
@@ -603,6 +583,7 @@ class MengeGym(gym.Env):
                 reward = 0
                 done = False
                 info = Nothing()
+            rp.logdebug('Current reward={} ({})'.format(reward, info))
             return reward, done, info
 
     def reset(self, phase='test', test_case=None):
@@ -617,7 +598,7 @@ class MengeGym(gym.Env):
         if test_case is not None:
             self.case_counter[phase] = test_case
         self.global_time = 0.0
-        self._prev_time = -1
+        self._prev_time = 0
 
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
@@ -643,13 +624,11 @@ class MengeGym(gym.Env):
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(5)
 
-        rp.logdebug("Set up subscribers and service proxies")
-        # rp.Subscriber("crowd_pose", PoseArray, self._crowd_pose_callback)
-        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50)
-        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50)
-        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50)
-        rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50)
-        self._advance_sim_srv = rp.ServiceProxy('advance_simulation', RunSim)
+        rp.logdebug("Set up subscribers")
+        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50, tcp_nodelay=True)
+        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50, tcp_nodelay=True)
+        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50, tcp_nodelay=True)
+        rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
 
         # Sample new goal
         self.sample_goal(exclude_initial=True)
@@ -688,4 +667,3 @@ class MengeGym(gym.Env):
 
         rp.loginfo("Env close - Shutting down simulation process and killing roscore")
         self.roshandle.terminate()
-        # self._sim_process.shutdown()

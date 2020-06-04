@@ -59,9 +59,6 @@ class BaseEnvConfig(object):
     robot.action_space.speed_sampling = 'exponential'
     robot.action_space.rotation_sampling = 'linear'
 
-    ros = Config()
-    ros.rate = 10
-
     def __init__(self, debug=False):
         if debug:
             self.env.val_size = 1
