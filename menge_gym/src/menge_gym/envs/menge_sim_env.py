@@ -183,6 +183,9 @@ class MengeGym(gym.Env):
                 img_parser = MengeMapParser(map_img, resolution)
                 img_parser.full_process(**kwargs)
                 self.config.scenario_xml = img_parser.output['base']
+            else:
+                raise ValueError("No scenario xml specified in config or not pointing to valid xml file")
+
         # get more parameters from scenario xml
         self._initialize_from_scenario()
 
