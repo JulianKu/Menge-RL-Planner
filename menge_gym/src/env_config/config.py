@@ -29,7 +29,7 @@ class BaseEnvConfig(object):
     reward.clearance_dist_penalty_factor = 0.5
 
     sim = Config()
-    sim.scenario = '/home/julian/Desktop/test_data/test.xml'
+    sim.scenario = '/home/julian/Desktop/test_data/small.xml'
     sim.human_num = 30
     sim.randomize_attributes = True
 
@@ -56,9 +56,6 @@ class BaseEnvConfig(object):
     robot.action_space.rotation_samples = 16
     robot.action_space.speed_sampling = 'exponential'
     robot.action_space.rotation_sampling = 'linear'
-
-    ros = Config()
-    ros.rate = 10
 
     def __init__(self, debug=False):
         if debug:
