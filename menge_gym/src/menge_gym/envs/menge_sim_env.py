@@ -116,11 +116,23 @@ class MengeGym(gym.Env):
             self.config.scenario_xml = config.sim.scenario
         # if no scenario provided, make new from image + parameters
         else:
-            print("No scenario found ({})".format(self.config.scenario_xml))
-            key = input("Do you want to create a new scenario instead? (Y/N)")
-            if key.lower() != 'y':
-                raise ValueError("Scenario xml specified in config does not point to valid xml file")
-            else:
+            print("No scenario specified in config or invalid path.")
+            key = input("Do you want to use an existing scenario? (Y/N)")
+            if key.lower() == 'y':
+                for _ in range(3):
+                    scenario = input("Provide path to the scenario xml file here: ")
+                    if not path.isfile(scenario) or not scenario.endswith(".xml"):
+                        print("Not a valid path to an xml file")
+                    else:
+                        self.config.scenario_xml = scenario
+                        break
+                else:
+                    # only executed if for loop not ended with break statement
+                    raise ValueError("No valid scenario file provided")
+            elif key.lower() == 'n':
+                key = input("Do you want to create a new scenario instead? (Y/N)")
+                if key != 'y':
+                    raise ValueError("No scenario xml specified in config or not pointing to valid xml file")
                 # get map file from input
                 print("Scenario file can be automatically generated from image file that shows a map of the environment")
                 for _ in range(3):
@@ -171,6 +183,9 @@ class MengeGym(gym.Env):
                 img_parser = MengeMapParser(map_img, resolution)
                 img_parser.full_process(**kwargs)
                 self.config.scenario_xml = img_parser.output['base']
+            else:
+                raise ValueError("No scenario xml specified in config or not pointing to valid xml file")
+
         # get more parameters from scenario xml
         self._initialize_from_scenario()
 
@@ -483,6 +498,8 @@ class MengeGym(gym.Env):
             if counter >= 10:
                 # raise TimeoutError("Simulator node not responding")
                 rp.logerr("Timeout reached, setting empty poses")
+                rp.loginfo("Global Time is set to time limit to start new instance")
+                self.global_time = self.config.time_limit
                 self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
                 self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
 
