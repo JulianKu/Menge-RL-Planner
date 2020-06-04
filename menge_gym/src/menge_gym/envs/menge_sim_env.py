@@ -498,6 +498,8 @@ class MengeGym(gym.Env):
             if counter >= 10:
                 # raise TimeoutError("Simulator node not responding")
                 rp.logerr("Timeout reached, setting empty poses")
+                rp.loginfo("Global Time is set to time limit to start new instance")
+                self.global_time = self.config.time_limit
                 self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
                 self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
 
