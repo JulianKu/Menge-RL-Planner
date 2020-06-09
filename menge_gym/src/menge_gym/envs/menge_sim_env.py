@@ -457,6 +457,8 @@ class MengeGym(gym.Env):
         self._robot_poses = []
         self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
 
+        self.roshandle.log_output()
+
         return ob, reward, done, info
 
     def _take_action(self, action: np.ndarray):
