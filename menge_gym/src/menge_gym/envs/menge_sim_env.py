@@ -337,7 +337,7 @@ class MengeGym(gym.Env):
     def setup_ros_connection(self):
         rp.loginfo("Initializing ROS")
         self.roshandle = ROSHandle()
-
+        rp.sleep(rp.Duration.from_sec(5))
         # TODO: rviz config not loaded properly (workaround: start rviz separately via launch file etc.)
         # visualization = True
         # if visualization:
@@ -641,7 +641,7 @@ class MengeGym(gym.Env):
                     'd': self.config.time_limit,
                     't': self.config.time_step}
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
-        rp.sleep(5)
+        rp.sleep(rp.Duration.from_sec(5))
 
         rp.logdebug("Set up subscribers")
         rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50, tcp_nodelay=True)

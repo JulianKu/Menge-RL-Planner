@@ -38,8 +38,8 @@ def obstacle2array(obs_pose: Pose) -> Tuple[float, float]:
     :return: list [x, y] (2D position x,y)
     """
     # only 2D point objects (x,y - no orientation)
-    x = obs_pose.position.x
-    y = obs_pose.position.y
+    x = float(obs_pose.position.x)
+    y = float(obs_pose.position.y)
     return x, y
 
 
