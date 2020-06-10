@@ -110,6 +110,7 @@ class ROSHandle:
         self.queue = queue.Queue()
 
         # check if "roscore" running already
+        self.core_process = None
         self.core_running, self.core_PID = isProcessRunning("roscore")
 
         if not self.core_running:
@@ -142,7 +143,7 @@ class ROSHandle:
         self.processes[pid] = proc
 
         thr = threading.Thread(target=output_reader, args=(proc, self.queue))
-        thr.daemon = True
+        # thr.daemon = True
         thr.start()
         self.threads[pid] = thr
 
@@ -178,6 +179,9 @@ class ROSHandle:
         self.threads = {}
         with self.queue.mutex:
             self.queue.queue.clear()
+
+        if self.core_process:
+            self.core_process.terminate()
 
         self.log_output()
 
