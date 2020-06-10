@@ -384,7 +384,7 @@ class ModelPredictiveRL(Policy):
 
         # vectorized distance formula for point and line segment
         d_min2human = point_to_segment_dist(d_0, d_1, origin) - human_states.radius - robot_state.radius
-        d_min2human = np.min(d_min2human)
+        d_min2human = d_min2human.min(initial=np.inf)
 
         # collision detection with obstacles
         if self.kinematics == 'holonomic':
