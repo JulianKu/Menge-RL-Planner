@@ -351,7 +351,7 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True)
+        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True, latch=True)
         self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
@@ -486,7 +486,7 @@ class MengeGym(gym.Env):
 
             # advance simulation
             time_diff = target_time - self.global_time
-            if time_diff > 0:
+            if counter == 0 and time_diff > 0:
                 rp.logdebug('Simulation not done yet')
                 
                 rp.logdebug("Publishing {} steps".format(n_steps))
