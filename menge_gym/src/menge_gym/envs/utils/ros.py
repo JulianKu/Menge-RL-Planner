@@ -1,9 +1,11 @@
 from geometry_msgs.msg import Pose
 from visualization_msgs.msg import Marker
 import subprocess
+import threading
+import queue
 import psutil
-from rospy import loginfo, logdebug, logerr
-from signal import SIGTERM, SIGKILL
+from rospy import loginfo  # , logdebug, logerr
+# from signal import SIGTERM, SIGKILL
 from numpy import arctan2
 from typing import Tuple, Dict
 
@@ -36,8 +38,8 @@ def obstacle2array(obs_pose: Pose) -> Tuple[float, float]:
     :return: list [x, y] (2D position x,y)
     """
     # only 2D point objects (x,y - no orientation)
-    x = obs_pose.position.x
-    y = obs_pose.position.y
+    x = float(obs_pose.position.x)
+    y = float(obs_pose.position.y)
     return x, y
 
 
@@ -81,26 +83,34 @@ def isProcessRunning(process_name: str) -> Tuple[bool, int]:
     return proc_running, pid
 
 
-def kill_child_processes(parent_pid, sig=SIGTERM):
-    try:
-        parent = psutil.Process(parent_pid)
-        loginfo(parent)
-    except psutil.NoSuchProcess:
-        logerr("parent process not existing")
-        return
-    children = parent.children(recursive=True)
-    loginfo(children)
-    for process in children:
-        loginfo("try to kill child: " + str(process))
-        process.send_signal(sig)
+# def kill_child_processes(parent_pid, sig=SIGTERM):
+#     try:
+#         parent = psutil.Process(parent_pid)
+#         loginfo(parent)
+#     except psutil.NoSuchProcess:
+#         logerr("parent process not existing")
+#         return
+#     children = parent.children(recursive=True)
+#     loginfo(children)
+#     for process in children:
+#         loginfo("try to kill child: " + str(process))
+#         process.send_signal(sig)
+
+
+def output_reader(proc: subprocess.Popen, out_queue: queue.Queue):
+    for line in iter(proc.stdout.readline, b''):
+        out_queue.put(line.decode('utf-8'))
 
 
 class ROSHandle:
 
     def __init__(self):
         self.processes = {}  # type: Dict[int, subprocess.Popen]
+        self.threads = {}  # type: Dict[int, threading.Thread]
+        self.queue = queue.Queue()
 
         # check if "roscore" running already
+        self.core_process = None
         self.core_running, self.core_PID = isProcessRunning("roscore")
 
         if not self.core_running:
@@ -109,6 +119,7 @@ class ROSHandle:
             self.core_process = subprocess.Popen(["roscore"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             self.core_PID = self.core_process.pid
             self.core_running = True
+            self.log_output()
 
     def start_rosnode(self, pkg: str, executable: str, launch_cli_args: Dict[str, str] = None) -> int:
         """
@@ -129,10 +140,27 @@ class ROSHandle:
         # run process
         proc = subprocess.Popen(run_expr, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         pid = proc.pid
-
         self.processes[pid] = proc
 
+        thr = threading.Thread(target=output_reader, args=(proc, self.queue))
+        # thr.daemon = True
+        thr.start()
+        self.threads[pid] = thr
+
+        self.log_output()
+
         return pid
+
+    def log_output(self):
+
+        out_queue = self.queue
+        print('--- Print subprocess output ---')
+        while True:
+            try:
+                print(out_queue.get_nowait(), end='')
+            except queue.Empty:
+                break
+        print('-------------------------------')
 
     def terminate(self):
         """
@@ -141,10 +169,21 @@ class ROSHandle:
         loginfo("Trying to kill all launched processes first")
         for pid in self.processes:
             process = self.processes[pid]
-            kill_child_processes(pid, SIGKILL)
-            process.kill()
+            # kill_child_processes(pid, SIGTERM)
+            # process.kill()
+            process.terminate()
             process.wait()
+            thread = self.threads[pid]
+            thread.join()
         self.processes = {}
+        self.threads = {}
+        with self.queue.mutex:
+            self.queue.queue.clear()
+
+        if self.core_process:
+            self.core_process.terminate()
+
+        self.log_output()
 
     def terminateOne(self, pid):
         """
@@ -154,6 +193,12 @@ class ROSHandle:
         """
         loginfo("trying to kill process with pid: %s" % pid)
         proc = self.processes.pop(pid)
-        kill_child_processes(pid, SIGKILL)
-        proc.kill()
+        # kill_child_processes(pid, SIGTERM)
+        # proc.kill()
+        proc.terminate()
         proc.wait()
+
+        thr = self.threads.pop(pid)
+        thr.join()
+
+        self.log_output()

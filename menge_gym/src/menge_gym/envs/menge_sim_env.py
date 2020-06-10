@@ -337,7 +337,7 @@ class MengeGym(gym.Env):
     def setup_ros_connection(self):
         rp.loginfo("Initializing ROS")
         self.roshandle = ROSHandle()
-
+        rp.sleep(rp.Duration.from_sec(5))
         # TODO: rviz config not loaded properly (workaround: start rviz separately via launch file etc.)
         # visualization = True
         # if visualization:
@@ -351,7 +351,7 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True)
+        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True, latch=True)
         self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
@@ -457,6 +457,8 @@ class MengeGym(gym.Env):
         self._robot_poses = []
         self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
 
+        self.roshandle.log_output()
+
         return ob, reward, done, info
 
     def _take_action(self, action: np.ndarray):
@@ -484,7 +486,7 @@ class MengeGym(gym.Env):
 
             # advance simulation
             time_diff = target_time - self.global_time
-            if time_diff > 0:
+            if counter == 0 and time_diff > 0:
                 rp.logdebug('Simulation not done yet')
                 
                 rp.logdebug("Publishing {} steps".format(n_steps))
@@ -639,7 +641,7 @@ class MengeGym(gym.Env):
                     'd': self.config.time_limit,
                     't': self.config.time_step}
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
-        rp.sleep(5)
+        rp.sleep(rp.Duration.from_sec(5))
 
         rp.logdebug("Set up subscribers")
         rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50, tcp_nodelay=True)
