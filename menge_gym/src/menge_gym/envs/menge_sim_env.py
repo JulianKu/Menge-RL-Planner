@@ -112,7 +112,7 @@ class MengeGym(gym.Env):
         self.config.time_step = config.env.time_step
 
         # Simulation
-        if hasattr(config.sim, 'scenario') and path.isfile(config.sim.scenario):
+        if hasattr(config.sim, 'scenario') and path.isfile(config.sim.scenario) and config.sim.scenario.endswith(".xml"):
             self.config.scenario_xml = config.sim.scenario
         # if no scenario provided, make new from image + parameters
         else:
@@ -616,6 +616,9 @@ class MengeGym(gym.Env):
 
         if test_case is not None:
             self.case_counter[phase] = test_case
+        elif phase == 'train':
+            self.case_counter[phase] += 1
+
         self.global_time = 0.0
         self._prev_time = 0
 
