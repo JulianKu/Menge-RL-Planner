@@ -1,6 +1,7 @@
 import os
 import logging
 import copy
+import pickle
 import torch
 from tqdm import tqdm
 from collections import Counter
@@ -8,11 +9,12 @@ from menge_gym.envs.utils.info import *
 
 
 class Explorer(object):
-    def __init__(self, env, robot, device, writer, memory=None, gamma=None, target_policy=None):
+    def __init__(self, env, robot, device, writer, progress_file, memory=None, gamma=None, target_policy=None):
         self.env = env
         self.robot = robot
         self.device = device
         self.writer = writer
+        self.progress_file = progress_file
         self.memory = memory
         self.gamma = gamma
         self.target_policy = target_policy
@@ -49,7 +51,12 @@ class Explorer(object):
             states = []
             actions = []
             rewards = []
+            step_no = 0
             while not done:
+                step_no += 1
+                print("######################################")
+                print("RUNNING EPISODE {}, STEP NUMBER {}".format(episode, step_no))
+                print("######################################")
                 action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
                 states.append(self.robot.policy.last_state)
@@ -63,6 +70,14 @@ class Explorer(object):
                 if isinstance(info, Clearance):
                     clearance += 1
                     clearance_min_dist.append(info.min_dist)
+            if episode == 10:
+                print("DONE")
+
+            # save replay buffer every 50th episode
+            if i % 50 == 0 or (episode is not None and episode % 50 == 0):
+                print("Dump memory to file")
+                progress = {"memory": self.memory, "episode": i}
+                pickle.dump(progress, open(self.progress_file, "wb"))
 
             if isinstance(info, ReachGoal):
                 success += 1
