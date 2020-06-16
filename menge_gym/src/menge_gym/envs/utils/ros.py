@@ -109,16 +109,16 @@ class ROSHandle:
         self.threads = {}  # type: Dict[int, threading.Thread]
         self.queue = queue.Queue()
 
-        # check if "roscore" running already
-        self.core_process = None
-        self.core_running, self.core_PID = isProcessRunning("roscore")
+        # check if "rosmaster" running already
+        self.master_process = None
+        self.master_running, self.master_PID = isProcessRunning("rosmaster")
 
-        if not self.core_running:
-            loginfo("No roscore running yet")
-            loginfo("Start new roscore")
-            self.core_process = subprocess.Popen(["roscore"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            self.core_PID = self.core_process.pid
-            self.core_running = True
+        if not self.master_running:
+            loginfo("No rosmaster running yet")
+            loginfo("Start new rosmaster")
+            self.master_process = subprocess.Popen(["roscore"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.master_PID = self.master_process.pid
+            self.master_running = True
             self.log_output()
 
     def start_rosnode(self, pkg: str, executable: str, launch_cli_args: Dict[str, str] = None) -> int:
@@ -164,7 +164,7 @@ class ROSHandle:
 
     def terminate(self):
         """
-        terminate all ros processes and the core itself
+        terminate all ros processes and the master itself
         """
         loginfo("Trying to kill all launched processes first")
         for pid in self.processes:
@@ -180,8 +180,10 @@ class ROSHandle:
         with self.queue.mutex:
             self.queue.queue.clear()
 
-        if self.core_process:
-            self.core_process.terminate()
+        if self.master_process:
+            self.master_process.terminate()
+            self.master_process.wait()
+            self.master_process = None
 
         self.log_output()
 
