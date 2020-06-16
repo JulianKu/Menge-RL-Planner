@@ -36,6 +36,7 @@ do
     then
         # kill task
         kill $pid
+        wait $pid
         # restart task in background
         python3 train.py --restart $@ &
         pid=$!
