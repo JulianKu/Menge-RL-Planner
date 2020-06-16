@@ -5,6 +5,7 @@ from rostopic import ROSTopicHz, ROSTopicIOException, _check_master, get_topic_c
 from argparse import ArgumentParser
 from os.path import exists
 from statistics import median
+import sys
 
 
 def main(topic, out):
@@ -16,7 +17,7 @@ def main(topic, out):
             master_runnning = True
         except ROSTopicIOException:
             master_runnning = False
-        rp.sleep(rp.Duration.from_sec(1))
+            rp.sleep(rp.Duration.from_sec(1))
     rp.init_node("frequency_writer", anonymous=True)
     rt = ROSTopicHz(-1)
     msg_class, real_topic, _ = get_topic_class(topic, blocking=True)  # pause hz until topic is published
@@ -44,8 +45,9 @@ def main(topic, out):
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser("return frequency [hz] of published topic")
+    parser = ArgumentParser(description="return frequency [hz] of published topic")
     parser.add_argument("topic", type=str, help="name of the topic")
     parser.add_argument("--out", "-o", type=str, default="hz.txt", help="file to write frequencies to")
     args = parser.parse_args()
     main(args.topic, args.out)
+    sys.exit(0)
