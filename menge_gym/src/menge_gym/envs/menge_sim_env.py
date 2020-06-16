@@ -73,8 +73,8 @@ class MengeGym(gym.Env):
         self.config.clearance_penalty_factor = None
 
         # Observation variables
-        self._crowd_poses = []  # type: List[np.ndarray]
-        self._robot_poses = []  # type: List[np.ndarray]
+        self._crowd_pose = None  # type: Union[None, np.ndarray]
+        self._robot_pose = None  # type: Union[None, np.ndarray]
         self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
         self.rob_tracker = None
         self.ped_tracker = None
@@ -358,7 +358,7 @@ class MengeGym(gym.Env):
         rp.logdebug('Crowd Expansion subscriber callback called')
         # transform MarkerArray message to numpy array (skip first marker as this is the "delete markers" action)
         marker_array = np.array(list(map(marker2array, msg.markers[1:])))
-        self._crowd_poses.append(marker_array.reshape(-1, 4))
+        self._crowd_pose = marker_array.reshape(-1, 4)
         rp.logdebug('Crowd callback done')
 
     def _static_obstacle_callback(self, msg: PoseArray):
@@ -383,7 +383,7 @@ class MengeGym(gym.Env):
             phi -= 2*np.pi
 
         # update list of robot poses + pointer to current position
-        self._robot_poses.append(np.array([x, y, phi, self.config.robot_radius]).reshape(-1, 4))
+        self._robot_pose = np.array([x, y, phi, self.config.robot_radius]).reshape(-1, 4)
         rp.logdebug('Robot Pose callback done')
 
     def _sim_time_callback(self, msg: Float32):
@@ -427,24 +427,25 @@ class MengeGym(gym.Env):
 
         reward, done, info = self._get_reward_done_info()
 
-        if isinstance(info, Timeout) and not (self._robot_poses and self._crowd_poses):
+        if isinstance(info, Timeout) and (self._robot_pose is None or self._crowd_pose is None):
             # in Timeout cases, crowd_poses and robot_poses might be missing
-            self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
-            self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
+            self._crowd_pose = np.array([], dtype=float).reshape(-1, 4)
+            self._robot_pose = np.array([], dtype=float).reshape(-1, 4)
+
+        robot_pose = self._robot_pose
+        crowd_pose = self._crowd_pose
 
         # in first iteration, initialize Kalman Tracker for robot
-        if not self.rob_tracker:
-            self.rob_tracker = KalmanTracker(self._robot_poses[0])
+        if not self.rob_tracker and np.any(robot_pose):
+            self.rob_tracker = KalmanTracker(robot_pose)
 
         # update velocities
-        for (robot_pose, crowd_pose) in zip(self._robot_poses, self._crowd_poses):
-            rp.logdebug("Robot Pose (Shape %r):\n %r" % (robot_pose.shape, robot_pose))
-            rp.logdebug("Crowd Pose (Shape %r):\n %r" % (crowd_pose.shape, crowd_pose))
-
+        self.rob_tracker.predict()
+        if isinstance(robot_pose, np.ndarray) and np.any(robot_pose):
+            self.rob_tracker.update(robot_pose)
+        if isinstance(crowd_pose, np.ndarray):
             ped_trackers = self.ped_tracker.update(crowd_pose)
-            self.rob_tracker.predict()
-            if np.any(robot_pose):
-                self.rob_tracker.update(robot_pose)
+
         rob_tracker = self.rob_tracker.get_state()
         pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()])
         robot_state = FullState(np.concatenate((rob_tracker, self.robot_const_state), axis=1))
@@ -453,8 +454,8 @@ class MengeGym(gym.Env):
         ob = self.observation
 
         # reset last poses
-        self._crowd_poses = []
-        self._robot_poses = []
+        self._crowd_pose = None
+        self._robot_pose = None
         self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
 
         self.roshandle.log_output()
@@ -477,7 +478,7 @@ class MengeGym(gym.Env):
         counter = 0
 
         self._cmd_vel_pub()
-        while not self._crowd_poses or not self._robot_poses:
+        while self._crowd_pose is None or self._robot_pose is None:
 
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
@@ -493,8 +494,8 @@ class MengeGym(gym.Env):
                 self._pub_step.publish(UInt8(data=n_steps))
 
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
-            rp.logdebug('#Crowd %d, #Rob %d' %
-                        (len(self._crowd_poses), len(self._robot_poses)))
+            rp.logdebug('#Crowd %b, #Rob %b' %
+                        (self_crowd_poses is not None, self._robot_pose is not None))
             counter += 1
             rp.logdebug('Counter={}'.format(counter))
             if counter >= 10:
@@ -502,8 +503,8 @@ class MengeGym(gym.Env):
                 rp.logerr("Timeout reached, setting empty poses")
                 rp.loginfo("Global Time is set to time limit to start new instance")
                 self.global_time = self.config.time_limit
-                self._crowd_poses.append(np.array([], dtype=float).reshape(-1, 4))
-                self._robot_poses.append(np.array([], dtype=float).reshape(-1, 4))
+                self._crowd_pose = np.array([], dtype=float).reshape(-1, 4)
+                self._robot_pose = np.array([], dtype=float).reshape(-1, 4)
 
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
@@ -526,26 +527,26 @@ class MengeGym(gym.Env):
             return reward, done, info
         else:
             # crowd_pose = [x, y, omega, r]
-            recent_crowd_pose = self._crowd_poses[-1]
+            crowd_pose = self._crowd_pose
 
             # obstacle_position = [x, y]
             obstacle_position = self._static_obstacles
 
             # robot_pose = [x, y, omega]
-            recent_robot_pose = self._robot_poses[-1]
+            robot_pose = self._robot_pose
 
             robot_radius = self.config.robot_radius
             goal = self.goal
 
-            if np.any(recent_crowd_pose) and np.any(recent_robot_pose):
-                crowd_distances = np.linalg.norm(recent_crowd_pose[:, :2] - recent_robot_pose[:, :2], axis=1)
-                crowd_distances -= recent_crowd_pose[:, -1]
+            if np.any(crowd_pose) and np.any(robot_pose):
+                crowd_distances = np.linalg.norm(crowd_pose[:, :2] - robot_pose[:, :2], axis=1)
+                crowd_distances -= crowd_pose[:, -1]
                 crowd_distances -= robot_radius
             else:
                 crowd_distances = np.array([])
 
-            if np.any(obstacle_position) and np.any(recent_robot_pose):
-                obstacle_distances = np.linalg.norm(obstacle_position - recent_robot_pose[:, :2], axis=1)
+            if np.any(obstacle_position) and np.any(robot_pose):
+                obstacle_distances = np.linalg.norm(obstacle_position - robot_pose[:, :2], axis=1)
                 obstacle_distances -= robot_radius
             else:
                 obstacle_distances = np.array([])
@@ -564,8 +565,8 @@ class MengeGym(gym.Env):
             else:
                 d_min_obstacle = obstacle_distances.min()
 
-            if np.any(recent_robot_pose):
-                d_goal = np.linalg.norm(recent_robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+            if np.any(robot_pose):
+                d_goal = np.linalg.norm(robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
             else:
                 d_goal = np.inf
 
