@@ -494,7 +494,7 @@ class MengeGym(gym.Env):
                 self._pub_step.publish(UInt8(data=n_steps))
 
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
-            rp.logdebug('#Crowd %b, #Rob %b' %
+            rp.logdebug('#Crowd %s, #Rob %s' %
                         (self._crowd_pose is not None, self._robot_pose is not None))
             counter += 1
             rp.logdebug('Counter={}'.format(counter))
