@@ -495,7 +495,7 @@ class MengeGym(gym.Env):
 
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
             rp.logdebug('#Crowd %b, #Rob %b' %
-                        (self_crowd_poses is not None, self._robot_pose is not None))
+                        (self.crowd_pose is not None, self._robot_pose is not None))
             counter += 1
             rp.logdebug('Counter={}'.format(counter))
             if counter >= 10:
