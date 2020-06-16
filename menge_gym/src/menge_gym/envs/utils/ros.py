@@ -182,6 +182,8 @@ class ROSHandle:
 
         if self.core_process:
             self.core_process.terminate()
+            self.core_process.wait()
+            self.core_process = None
 
         self.log_output()
 
@@ -192,13 +194,24 @@ class ROSHandle:
         :param pid: process id for process to kill
         """
         loginfo("trying to kill process with pid: %s" % pid)
-        proc = self.processes.pop(pid)
+        proc = None
+        try:
+            proc = self.processes.pop(pid)
+        except KeyError:
+            try:
+                proc = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                print("Process already terminated")
         # kill_child_processes(pid, SIGTERM)
         # proc.kill()
-        proc.terminate()
-        proc.wait()
+        if proc is not None:
+            proc.terminate()
+            proc.wait()
 
-        thr = self.threads.pop(pid)
-        thr.join()
+        try:
+            thr = self.threads.pop(pid)
+            thr.join()
+        except KeyError:
+            print("Thread already terminated")
 
         self.log_output()
