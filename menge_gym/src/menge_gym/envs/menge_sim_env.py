@@ -436,8 +436,13 @@ class MengeGym(gym.Env):
         crowd_pose = self._crowd_pose
 
         # in first iteration, initialize Kalman Tracker for robot
-        if not self.rob_tracker and np.any(robot_pose):
-            self.rob_tracker = KalmanTracker(robot_pose)
+        if self.rob_tracker is None:
+            if np.any(robot_pose):
+                self.rob_tracker = KalmanTracker(robot_pose)
+            else:
+                initial_pose = np.concatenate((self.initial_robot_pos, 
+                                               np.array([0, self.config.robot_radius]).reshape(1, 2)), axis=1)
+                self.rob_tracker = KalmanTracker(initial_pose)
 
         # update velocities
         self.rob_tracker.predict()
