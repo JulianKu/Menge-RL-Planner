@@ -618,6 +618,8 @@ class MengeGym(gym.Env):
             self.case_counter[phase] = test_case
         self.global_time = 0.0
         self._prev_time = 0
+        self.rob_tracker = None
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step)
 
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
@@ -650,6 +652,7 @@ class MengeGym(gym.Env):
         rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
 
         # Sample new goal
+        self.initial_robot_pos = None
         self.sample_goal(exclude_initial=True)
 
         # perform idle action and return observation
