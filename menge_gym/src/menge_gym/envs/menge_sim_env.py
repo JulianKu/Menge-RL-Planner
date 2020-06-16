@@ -332,7 +332,7 @@ class MengeGym(gym.Env):
 
         self.goal = goals_array[np.random.randint(len(goals_array))]
         # set constant part of the robot's state
-        self.robot_const_state = np.concatenate((self.goal, [self.config.robot_v_pref])).reshape(-1, 4)
+        self.robot_const_state = np.concatenate((self.goal, [self.config.robot_v_pref])).reshape(1, 4)
 
     def setup_ros_connection(self):
         rp.loginfo("Initializing ROS")
@@ -383,7 +383,7 @@ class MengeGym(gym.Env):
             phi -= 2*np.pi
 
         # update list of robot poses + pointer to current position
-        self._robot_pose = np.array([x, y, phi, self.config.robot_radius]).reshape(-1, 4)
+        self._robot_pose = np.array([x, y, phi, self.config.robot_radius]).reshape(1, 4)
         rp.logdebug('Robot Pose callback done')
 
     def _sim_time_callback(self, msg: Float32):
@@ -429,15 +429,20 @@ class MengeGym(gym.Env):
 
         if isinstance(info, Timeout) and (self._robot_pose is None or self._crowd_pose is None):
             # in Timeout cases, crowd_poses and robot_poses might be missing
-            self._crowd_pose = np.array([], dtype=float).reshape(-1, 4)
-            self._robot_pose = np.array([], dtype=float).reshape(-1, 4)
+            self._crowd_pose = np.array([], dtype=float).reshape(0, 4)
+            self._robot_pose = np.array([], dtype=float).reshape(0, 4)
 
         robot_pose = self._robot_pose
         crowd_pose = self._crowd_pose
 
         # in first iteration, initialize Kalman Tracker for robot
-        if not self.rob_tracker and np.any(robot_pose):
-            self.rob_tracker = KalmanTracker(robot_pose)
+        if self.rob_tracker is None:
+            if np.any(robot_pose):
+                self.rob_tracker = KalmanTracker(robot_pose)
+            else:
+                initial_pose = np.concatenate((self.initial_robot_pos, 
+                                               np.array([0, self.config.robot_radius]).reshape(1, 2)), axis=1)
+                self.rob_tracker = KalmanTracker(initial_pose)
 
         # update velocities
         self.rob_tracker.predict()
@@ -506,8 +511,8 @@ class MengeGym(gym.Env):
                 rp.logerr("Timeout reached, setting empty poses")
                 rp.loginfo("Global Time is set to time limit to start new instance")
                 self.global_time = self.config.time_limit
-                self._crowd_pose = np.array([], dtype=float).reshape(-1, 4)
-                self._robot_pose = np.array([], dtype=float).reshape(-1, 4)
+                self._crowd_pose = np.array([], dtype=float).reshape(0, 4)
+                self._robot_pose = np.array([], dtype=float).reshape(0, 4)
 
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
