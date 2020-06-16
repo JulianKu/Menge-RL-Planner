@@ -66,4 +66,4 @@ def get_robot_initial_position(scene_xml: str) -> np.ndarray:
     robot_attributes = root.findall("AgentGroup/ProfileSelector[@name='robot']/../Generator/Agent")[0].attrib
     x = float(robot_attributes['p_x'])
     y = float(robot_attributes['p_y'])
-    return np.array((x, y)).reshape(-1, 2)
+    return np.array((x, y)).reshape(1, 2)
