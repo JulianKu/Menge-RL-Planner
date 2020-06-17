@@ -97,6 +97,7 @@ class MengeGym(gym.Env):
         self._sim_pid = None
         self._pub_step = None
         self._pub_cmd_vel = None
+        self._subscribers = [] # type: List[rp.Subscriber]
         self.global_time = None
         self._prev_time = None
 
@@ -335,8 +336,10 @@ class MengeGym(gym.Env):
         self.robot_const_state = np.concatenate((self.goal, [self.config.robot_v_pref])).reshape(1, 4)
 
     def setup_ros_connection(self):
-        rp.loginfo("Initializing ROS")
+
         self.roshandle = ROSHandle()
+        rp.loginfo("Initialized ROS")
+
         rp.sleep(rp.Duration.from_sec(5))
         # TODO: rviz config not loaded properly (workaround: start rviz separately via launch file etc.)
         # visualization = True
@@ -646,6 +649,11 @@ class MengeGym(gym.Env):
         else:
             raise NotImplementedError("Case counter < 0 were for debug purposes in original environment")
 
+        # unregister existing subscribers
+        for sub in self._subscribers:
+            sub.unregister()
+        self._subscribers = []
+
         if self._sim_pid is not None:
             rp.loginfo("Env reset - Shutting down simulation process")
             self.roshandle.terminateOne(self._sim_pid)
@@ -658,11 +666,20 @@ class MengeGym(gym.Env):
         rp.sleep(rp.Duration.from_sec(5))
 
         rp.logdebug("Set up subscribers")
-        rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50, tcp_nodelay=True)
-        rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50, tcp_nodelay=True)
-        rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50, tcp_nodelay=True)
-        rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
-
+        self._subscribers.append(
+            rp.Subscriber("crowd_expansion", MarkerArray, self._crowd_expansion_callback, queue_size=50,
+                          tcp_nodelay=True)
+        )
+        self._subscribers.append(
+            rp.Subscriber("laser_static_end", PoseArray, self._static_obstacle_callback, queue_size=50,
+                          tcp_nodelay=True)
+        )
+        self._subscribers.append(
+            rp.Subscriber("pose", PoseStamped, self._robot_pose_callback, queue_size=50, tcp_nodelay=True)
+        )
+        self._subscribers.append(
+            rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
+        )
         # Sample new goal
         self.initial_robot_pos = None
         self.sample_goal(exclude_initial=True)
@@ -700,4 +717,6 @@ class MengeGym(gym.Env):
         """
 
         rp.loginfo("Env close - Shutting down simulation process and killing roscore")
+        for sub in self._subscribers:
+            sub.unregister()
         self.roshandle.terminate()

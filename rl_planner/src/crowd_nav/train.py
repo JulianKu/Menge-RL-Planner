@@ -9,6 +9,7 @@ import importlib.util
 import torch
 import gym
 import copy
+import signal
 import pickle
 from tensorboardX import SummaryWriter
 from crowd_nav.utils.robot import Robot
@@ -28,6 +29,19 @@ def set_random_seeds(seed):
 
 
 def main(args):
+
+    def signal_handler(signalNumber, frame):
+        print("Received signal: {}".format(signal.Signals(signalNumber).name))
+        try:
+            env.close()
+        except NameError:
+            pass
+        sys.exit()
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
     # set current working directory (cwd) to this script's location
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
