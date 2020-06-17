@@ -33,6 +33,11 @@ def main(args):
     def signal_handler(signalNumber, frame):
         print("Received signal: {}".format(signal.Signals(signalNumber).name))
         try:
+            if hasattr(explorer, "save_memory"):
+                explorer.save_memory()
+        except NameError:
+            pass
+        try:
             env.close()
         except NameError:
             pass
@@ -149,6 +154,8 @@ def main(args):
         progress = pickle.load(open(progress_file, "rb"))
         memory = progress["memory"]
         saved_episodes = progress["episode"]
+        if saved_episodes is None:
+            saved_episodes = 0
 
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
