@@ -233,7 +233,9 @@ def main(args):
         torch.save(best_val_model, os.path.join(args.output_dir, 'best_val.pth'))
         logging.info('Save the best val model with the reward: {}'.format(best_val_reward))
     explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
+    env.close()
 
+    return
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
