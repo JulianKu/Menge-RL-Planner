@@ -180,10 +180,10 @@ class ROSHandle:
         with self.queue.mutex:
             self.queue.queue.clear()
 
-        if self.master_process:
-            self.master_process.terminate()
-            self.master_process.wait()
-            self.master_process = None
+        # if self.master_process:
+        #     self.master_process.terminate()
+        #     self.master_process.wait()
+        #     self.master_process = None
 
         self.log_output()
 
