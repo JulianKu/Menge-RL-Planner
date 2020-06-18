@@ -396,7 +396,7 @@ class ModelPredictiveRL(Policy):
 
         # TODO: not only check for circle collision (via radius) but also rectangle (spanned by radius + length)
         d_min2obs = point_to_segment_dist(robot_state.position, end_position, obstacles.position) - robot_state.radius
-        d_min2obs = np.min(d_min2obs)
+        d_min2obs = d_min2obs.min(initial=np.inf)
 
         # check if reaching the goal
         reaching_goal = norm(end_position - robot_state.goal_position) < robot_state.radius + robot_state.goal_radius

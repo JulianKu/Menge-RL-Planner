@@ -10,6 +10,7 @@ import torch
 import gym
 import copy
 import signal
+import pickle
 from tensorboardX import SummaryWriter
 from crowd_nav.utils.robot import Robot
 from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer
@@ -32,6 +33,11 @@ def main(args):
     def signal_handler(signalNumber, frame):
         print("Received signal: {}".format(signal.Signals(signalNumber).name))
         try:
+            if hasattr(explorer, "save_memory"):
+                explorer.save_memory()
+        except NameError:
+            pass
+        try:
             env.close()
         except NameError:
             pass
@@ -48,7 +54,10 @@ def main(args):
     # configure paths
     make_new_dir = True
     if os.path.exists(args.output_dir):
-        if args.overwrite:
+        if args.restart:
+            # do not overwrite existing progress on restart
+            make_new_dir = False
+        elif args.overwrite:
             shutil.rmtree(args.output_dir)
         else:
             key = input('Output directory already exists! Overwrite the folder? (y/n)')
@@ -79,7 +88,7 @@ def main(args):
     log_file = os.path.join(args.output_dir, 'output.log')
     il_weight_file = os.path.join(args.output_dir, 'il_model.pth')
     rl_weight_file = os.path.join(args.output_dir, 'rl_model.pth')
-
+    progress_file = os.path.abspath(os.path.join(args.output_dir, 'progress.p'))
     spec = importlib.util.spec_from_file_location('config', args.config)
     if spec is None:
         parser.error('Config file not found.')
@@ -100,6 +109,12 @@ def main(args):
 
     # configure environment
     env_config = config.EnvConfig(args.debug)
+
+    new_scenario = args.scenario  # type: str
+    if new_scenario:
+        assert os.path.exists(new_scenario) and new_scenario.endswith(".xml"), "specified scenario is invalid"
+        env_config.sim.scenario = new_scenario
+
     env = gym.make("menge_gym:MengeGym-v0")
     env.configure(env_config, args.randomseed)
     if hasattr(env, 'roshandle'):
@@ -133,6 +148,15 @@ def main(args):
 
     # configure trainer and explorer
     memory = ReplayMemory(capacity)
+    saved_episodes = 0
+
+    if os.path.exists(progress_file):
+        progress = pickle.load(open(progress_file, "rb"))
+        memory = progress["memory"]
+        saved_episodes = progress["episode"]
+        if saved_episodes is None:
+            saved_episodes = 0
+
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
     optimizer = train_config.trainer.optimizer
@@ -145,19 +169,21 @@ def main(args):
                               share_graph_model=policy_config.model_predictive_rl.share_graph_model)
     else:
         trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
-    explorer = Explorer(env, robot, device, writer, memory, policy.gamma, target_policy=policy)
+    explorer = Explorer(env, robot, device, writer, progress_file, memory, policy.gamma, target_policy=policy)
     # imitation learning
     if args.resume:
         if not os.path.exists(rl_weight_file):
             logging.error('RL weights does not exist')
-        model.load_state_dict(torch.load(rl_weight_file))
+        policy.load_state_dict(torch.load(rl_weight_file))
+        model = policy.get_model()
         rl_weight_file = os.path.join(args.output_dir, 'resumed_rl_model.pth')
         logging.info('Load reinforcement learning trained weights. Resume training')
     elif os.path.exists(il_weight_file):
-        model.load_state_dict(torch.load(il_weight_file))
+        policy.load_state_dict(torch.load(il_weight_file))
+        model = policy.get_model()
         logging.info('Load imitation learning trained weights.')
     else:
-        il_episodes = train_config.imitation_learning.il_episodes
+        il_episodes = train_config.imitation_learning.il_episodes - saved_episodes
         il_policy = train_config.imitation_learning.il_policy
         il_epochs = train_config.imitation_learning.il_epochs
         il_learning_rate = train_config.imitation_learning.il_learning_rate
@@ -185,10 +211,10 @@ def main(args):
     robot.set_policy(policy)
     trainer.set_learning_rate(rl_learning_rate)
     # fill the memory pool with some RL experience
-    if args.resume:
+    if args.resume and saved_episodes < 100:
         robot.policy.set_epsilon(epsilon_end)
         explorer.run_k_episodes(100, 'train', update_memory=True, episode=0)
-        logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
+    logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
     episode = 0
     best_val_reward = -1
     best_val_model = None
@@ -251,6 +277,7 @@ def main(args):
 
     return
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument('--policy', type=str, default='model_predictive_rl')
@@ -259,10 +286,12 @@ if __name__ == '__main__':
     parser.add_argument('--overwrite', default=False, action='store_true')
     parser.add_argument('--weights', type=str)
     parser.add_argument('--resume', default=False, action='store_true')
+    parser.add_argument('--restart', default=False, action='store_true')
     parser.add_argument('--gpu', default=False, action='store_true')
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--test_after_every_eval', default=False, action='store_true')
     parser.add_argument('--randomseed', type=int, default=17)
+    parser.add_argument('--scenario', type=str)
 
     # arguments for GCN
     # parser.add_argument('--X_dim', type=int, default=32)
