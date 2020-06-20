@@ -428,6 +428,8 @@ class ModelPredictiveRL(Policy):
         :return: Tuple of tensors (robot_state_tensor, human_states_tensor, obstacle_tensor)
         """
         if (isinstance(state, tuple) and isinstance(state[0], torch.Tensor)) or isinstance(state, torch.Tensor):
+            print("no transform")
             return state
         else:
+            print("device for transform: {}".format(self.device))
             return state.to_tensor(device=self.device)
