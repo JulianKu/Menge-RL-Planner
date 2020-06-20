@@ -167,7 +167,7 @@ def main(args):
     if os.path.exists(progress_file):
         progress = pickle.load(open(progress_file, "rb"))
         memory = progress["memory"]
-        memory.memory = iterable_to_device(memory.memory, device)
+        memory.memory = list(iterable_to_device(memory.memory, device))
         saved_episodes = progress["episode"]
         if saved_episodes is None:
             saved_episodes = 0
