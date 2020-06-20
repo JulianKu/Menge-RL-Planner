@@ -53,8 +53,8 @@ class Explorer(object):
             actions = []
             rewards = []
             step_no = 0
+            self.current_episode = episode if episode is not None else i
             while not done:
-                self.current_episode = episode if episode is not None else i
                 step_no += 1
                 print("######################################")
                 print("RUNNING EPISODE {}, STEP NUMBER {}".format(episode, step_no))
@@ -177,14 +177,6 @@ class Explorer(object):
                     value = 0
             value = torch.Tensor([value]).to(self.device)
             reward = torch.Tensor([rewards[i]]).to(self.device)
-
-            try:
-                print("state device: {}".format(state.device))
-            except AttributeError:
-                try:
-                    print("state device: {}".format(state[0].device))
-                except AttributeError:
-                    pass
 
             if self.target_policy.name == 'ModelPredictiveRL':
                 self.memory.push((state[0], state[1], state[2], value, reward,

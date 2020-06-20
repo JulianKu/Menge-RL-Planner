@@ -165,12 +165,15 @@ def main(args):
     saved_episodes = 0
 
     if os.path.exists(progress_file):
+        print("Loading progress file")
         progress = pickle.load(open(progress_file, "rb"))
         memory = progress["memory"]
         memory.memory = list(iterable_to_device(memory.memory, device))
+        print("Memory length: {}".format(len(memory)))
         saved_episodes = progress["episode"]
         if saved_episodes is None:
             saved_episodes = 0
+        print("Saved episodes: {}".format(saved_episodes))
 
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
