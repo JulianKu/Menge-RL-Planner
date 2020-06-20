@@ -19,6 +19,20 @@ from crowd_nav.utils.explorer import Explorer
 from crowd_nav.policy.policy_factory import policy_factory
 
 
+def iterable_to_device(iterable, device):
+    new_iterable = []
+    for i in iterable:
+        res = None
+        if isinstance(i, torch.Tensor):
+            res = i.to(device)
+        elif hasattr(i, "__iter__"):
+            res = iterable_to_device(i, device)
+
+        if res is not None:
+            new_iterable.append(res)
+    return tuple(new_iterable)
+
+
 def set_random_seeds(seed):
     """
     Sets the random seeds for pytorch cpu and gpu
@@ -153,6 +167,7 @@ def main(args):
     if os.path.exists(progress_file):
         progress = pickle.load(open(progress_file, "rb"))
         memory = progress["memory"]
+        memory.memory = iterable_to_device(memory.memory, device)
         saved_episodes = progress["episode"]
         if saved_episodes is None:
             saved_episodes = 0
