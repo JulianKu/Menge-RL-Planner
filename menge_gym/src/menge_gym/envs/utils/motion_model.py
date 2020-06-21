@@ -176,6 +176,9 @@ class ModifiedAckermannModel(object):
         else:
             center = np.array(center).reshape(-1)
 
+        if isinstance(orientation, torch.Tensor):
+            orientation = orientation.cpu()
+
         self.pos_center = center
         self.orientation = map_angle(orientation)
         if self.use_tensor:
@@ -230,6 +233,9 @@ class ModifiedAckermannModel(object):
 
         assert self.timestep is not None, "to update the model's position setting a timestep by which to advance " \
                                           "is required first (use class method 'setTimeStep')"
+
+        if isinstance(action, torch.Tensor):
+            action = action.cpu()
 
         velocity, steering_angle = action if action is not None else (self.velocity, self.steering_angle)
 
