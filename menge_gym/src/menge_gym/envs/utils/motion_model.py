@@ -178,11 +178,15 @@ class ModifiedAckermannModel(object):
 
         self.pos_center = center
         self.orientation = map_angle(orientation)
-        angle_legs = (np.cos(self.orientation), np.sin(self.orientation))
         if self.use_tensor:
-            angle_legs = torch.Tensor(angle_legs).view(-1)
+            if isinstance(self.orientation, torch.Tensor):
+                angle_legs = torch.Tensor((torch.sin(self.orientation), torch.cos(self.orientation))).view(-1)
+            else:
+                angle_legs = torch.Tensor((np.cos(self.orientation), np.sin(self.orientation))).view(-1)
         else:
-            angle_legs = np.array(angle_legs).reshape(-1)
+            if isinstance(self.orientation, torch.Tensor):
+                self.orientation = self.orientation.cpu().numpy()
+            angle_legs = np.array((np.cos(self.orientation), np.sin(self.orientation))).reshape(-1)
         self.pos_front_wheel = center + angle_legs * self.length_front
         self.pos_rear_wheel = center - angle_legs * self.length_rear
 
