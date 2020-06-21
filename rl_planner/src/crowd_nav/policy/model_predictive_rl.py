@@ -384,7 +384,8 @@ class ModelPredictiveRL(Policy):
 
         # vectorized distance formula for point and line segment
         d_min2human = point_to_segment_dist(d_0, d_1, origin) - human_states.radius - robot_state.radius
-        d_min2human = d_min2human.min(initial=np.inf)
+        if d_min2human.size == 0:
+            d_min2human = np.inf
 
         # collision detection with obstacles
         if self.kinematics == 'holonomic':
@@ -396,7 +397,8 @@ class ModelPredictiveRL(Policy):
 
         # TODO: not only check for circle collision (via radius) but also rectangle (spanned by radius + length)
         d_min2obs = point_to_segment_dist(robot_state.position, end_position, obstacles.position) - robot_state.radius
-        d_min2obs = d_min2obs.min(initial=np.inf)
+        if d_min2obs.size == 0:
+            d_min2obs = np.inf
 
         # check if reaching the goal
         reaching_goal = norm(end_position - robot_state.goal_position) < robot_state.radius + robot_state.goal_radius
