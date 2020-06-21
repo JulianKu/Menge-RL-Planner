@@ -166,7 +166,7 @@ class ModifiedAckermannModel(object):
         :param orientation: float, angle of the vehicle base in relation to world coordinate system
         """
         if isinstance(center, torch.Tensor) and self.use_tensor:
-            center = center.view(-1)
+            center = center.view(-1).cpu()
         elif not isinstance(center, torch.Tensor) and self.use_tensor:
             center = torch.Tensor(center).view(-1)
         elif isinstance(center, np.ndarray) and not self.use_tensor:
@@ -180,12 +180,12 @@ class ModifiedAckermannModel(object):
         self.orientation = map_angle(orientation)
         if self.use_tensor:
             if isinstance(self.orientation, torch.Tensor):
-                angle_legs = torch.Tensor((torch.sin(self.orientation), torch.cos(self.orientation))).view(-1)
+                angle_legs = torch.Tensor((torch.sin(self.orientation), torch.cos(self.orientation))).view(-1).cpu()
             else:
                 angle_legs = torch.Tensor((np.cos(self.orientation), np.sin(self.orientation))).view(-1)
         else:
             if isinstance(self.orientation, torch.Tensor):
-                self.orientation = self.orientation.cpu().numpy()
+                self.orientation = self.orientation.cpu().data.numpy()
             angle_legs = np.array((np.cos(self.orientation), np.sin(self.orientation))).reshape(-1)
         self.pos_front_wheel = center + angle_legs * self.length_front
         self.pos_rear_wheel = center - angle_legs * self.length_rear
@@ -284,7 +284,7 @@ class ModifiedAckermannModel(object):
         orientationComponentsVehicle = (np.cos(self.orientation), np.sin(self.orientation))
 
         if isinstance(velocityComponentsCenter, torch.Tensor) and self.use_tensor:
-            velocityComponentsCenter = velocityComponentsCenter.view(-1)
+            velocityComponentsCenter = velocityComponentsCenter.view(-1).cpu()
             orientationComponentsVehicle = torch.Tensor(orientationComponentsVehicle).view(-1)
         elif not isinstance(velocityComponentsCenter, torch.Tensor) and self.use_tensor:
             velocityComponentsCenter = torch.Tensor(velocityComponentsCenter).view(-1)
