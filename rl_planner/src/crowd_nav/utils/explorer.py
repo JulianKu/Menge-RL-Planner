@@ -20,6 +20,7 @@ class Explorer(object):
         self.target_policy = target_policy
         self.statistics = None
         self.current_episode = None
+        self.saved_episodes = None
 
     # @profile
     def run_k_episodes(self, k, phase, update_memory=False, imitation_learning=False, episode=None, epoch=None,
@@ -53,8 +54,8 @@ class Explorer(object):
             actions = []
             rewards = []
             step_no = 0
+            self.current_episode = episode if episode is not None else i
             while not done:
-                self.current_episode = episode if episode is not None else i
                 step_no += 1
                 print("######################################")
                 print("RUNNING EPISODE {}, STEP NUMBER {}".format(episode, step_no))
@@ -76,7 +77,7 @@ class Explorer(object):
                 print("DONE")
 
             # save replay buffer every 50th episode
-            if i % 50 == 0 or (episode is not None and episode % 50 == 0):
+            if self.current_episode % 50 == 0:
                 self.save_memory()
 
             if isinstance(info, ReachGoal):
@@ -149,9 +150,15 @@ class Explorer(object):
 
         return self.statistics
 
+    def set_saved_episodes(self, episode: int):
+        self.saved_episodes = episode
+
     def save_memory(self):
         print("Dump memory to file")
-        progress = {"memory": self.memory, "episode": self.current_episode}
+        episode = self.current_episode
+        if self.saved_episodes is not None:
+            episode += self.saved_episodes
+        progress = {"memory": self.memory, "episode": episode}
         pickle.dump(progress, open(self.progress_file, "wb"))
 
     def update_memory(self, states, actions, rewards, imitation_learning=False):

@@ -19,6 +19,20 @@ from crowd_nav.utils.explorer import Explorer
 from crowd_nav.policy.policy_factory import policy_factory
 
 
+def iterable_to_device(iterable, device):
+    new_iterable = []
+    for i in iterable:
+        res = None
+        if isinstance(i, torch.Tensor):
+            res = i.to(device)
+        elif hasattr(i, "__iter__"):
+            res = iterable_to_device(i, device)
+
+        if res is not None:
+            new_iterable.append(res)
+    return tuple(new_iterable)
+
+
 def set_random_seeds(seed):
     """
     Sets the random seeds for pytorch cpu and gpu
@@ -151,11 +165,15 @@ def main(args):
     saved_episodes = 0
 
     if os.path.exists(progress_file):
+        print("Loading progress file")
         progress = pickle.load(open(progress_file, "rb"))
         memory = progress["memory"]
+        memory.memory = list(iterable_to_device(memory.memory, device))
+        print("Memory length: {}".format(len(memory)))
         saved_episodes = progress["episode"]
         if saved_episodes is None:
             saved_episodes = 0
+        print("Saved episodes: {}".format(saved_episodes))
 
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
@@ -170,6 +188,7 @@ def main(args):
     else:
         trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
     explorer = Explorer(env, robot, device, writer, progress_file, memory, policy.gamma, target_policy=policy)
+    explorer.set_saved_episodes(saved_episodes)
     # imitation learning
     if args.resume:
         if not os.path.exists(rl_weight_file):
@@ -184,6 +203,8 @@ def main(args):
         logging.info('Load imitation learning trained weights.')
     else:
         il_episodes = train_config.imitation_learning.il_episodes - saved_episodes
+        if il_episodes < 0:
+            il_episodes = 0
         il_policy = train_config.imitation_learning.il_policy
         il_epochs = train_config.imitation_learning.il_epochs
         il_learning_rate = train_config.imitation_learning.il_learning_rate
@@ -199,6 +220,7 @@ def main(args):
         il_policy.safety_space = safety_space
         robot.set_policy(il_policy)
         explorer.run_k_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
+        saved_episodes = 0
         trainer.optimize_epoch(il_epochs)
         policy.save_model(il_weight_file)
         logging.info('Finish imitation learning. Weights saved.')
@@ -213,7 +235,9 @@ def main(args):
     # fill the memory pool with some RL experience
     if args.resume and saved_episodes < 100:
         robot.policy.set_epsilon(epsilon_end)
-        explorer.run_k_episodes(100, 'train', update_memory=True, episode=0)
+        explorer.set_saved_episodes(saved_episodes)
+        explorer.run_k_episodes(100 - saved_episodes, 'train', update_memory=True, episode=0)
+        saved_episodes = 0
     logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
     episode = 0
     best_val_reward = -1
@@ -229,8 +253,9 @@ def main(args):
             explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
             explorer.log('test', episode // evaluation_interval)
 
+    explorer.set_saved_episodes(saved_episodes)
     episode = 0
-    while episode < train_episodes:
+    while (episode + saved_episodes) < train_episodes:
         if args.resume:
             epsilon = epsilon_end
         else:

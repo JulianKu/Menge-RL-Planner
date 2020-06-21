@@ -166,7 +166,7 @@ class ModifiedAckermannModel(object):
         :param orientation: float, angle of the vehicle base in relation to world coordinate system
         """
         if isinstance(center, torch.Tensor) and self.use_tensor:
-            center = center.view(-1)
+            center = center.view(-1).cpu()
         elif not isinstance(center, torch.Tensor) and self.use_tensor:
             center = torch.Tensor(center).view(-1)
         elif isinstance(center, np.ndarray) and not self.use_tensor:
@@ -176,13 +176,20 @@ class ModifiedAckermannModel(object):
         else:
             center = np.array(center).reshape(-1)
 
+        if isinstance(orientation, torch.Tensor):
+            orientation = orientation.cpu()
+
         self.pos_center = center
         self.orientation = map_angle(orientation)
-        angle_legs = (np.cos(self.orientation), np.sin(self.orientation))
         if self.use_tensor:
-            angle_legs = torch.Tensor(angle_legs).view(-1)
+            if isinstance(self.orientation, torch.Tensor):
+                angle_legs = torch.Tensor((torch.sin(self.orientation), torch.cos(self.orientation))).view(-1).cpu()
+            else:
+                angle_legs = torch.Tensor((np.cos(self.orientation), np.sin(self.orientation))).view(-1)
         else:
-            angle_legs = np.array(angle_legs).reshape(-1)
+            if isinstance(self.orientation, torch.Tensor):
+                self.orientation = self.orientation.cpu().data.numpy()
+            angle_legs = np.array((np.cos(self.orientation), np.sin(self.orientation))).reshape(-1)
         self.pos_front_wheel = center + angle_legs * self.length_front
         self.pos_rear_wheel = center - angle_legs * self.length_rear
 
@@ -226,6 +233,9 @@ class ModifiedAckermannModel(object):
 
         assert self.timestep is not None, "to update the model's position setting a timestep by which to advance " \
                                           "is required first (use class method 'setTimeStep')"
+
+        if isinstance(action, torch.Tensor):
+            action = action.cpu()
 
         velocity, steering_angle = action if action is not None else (self.velocity, self.steering_angle)
 
@@ -280,7 +290,7 @@ class ModifiedAckermannModel(object):
         orientationComponentsVehicle = (np.cos(self.orientation), np.sin(self.orientation))
 
         if isinstance(velocityComponentsCenter, torch.Tensor) and self.use_tensor:
-            velocityComponentsCenter = velocityComponentsCenter.view(-1)
+            velocityComponentsCenter = velocityComponentsCenter.view(-1).cpu()
             orientationComponentsVehicle = torch.Tensor(orientationComponentsVehicle).view(-1)
         elif not isinstance(velocityComponentsCenter, torch.Tensor) and self.use_tensor:
             velocityComponentsCenter = torch.Tensor(velocityComponentsCenter).view(-1)
