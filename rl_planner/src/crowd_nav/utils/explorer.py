@@ -20,6 +20,7 @@ class Explorer(object):
         self.target_policy = target_policy
         self.statistics = None
         self.current_episode = None
+        self.saved_episodes = None
 
     # @profile
     def run_k_episodes(self, k, phase, update_memory=False, imitation_learning=False, episode=None, epoch=None,
@@ -149,9 +150,15 @@ class Explorer(object):
 
         return self.statistics
 
+    def set_saved_episodes(self, episode: int):
+        self.saved_episodes = episode
+
     def save_memory(self):
         print("Dump memory to file")
-        progress = {"memory": self.memory, "episode": self.current_episode}
+        episode = self.current_episode
+        if self.saved_episodes is not None:
+            episode += self.saved_episodes
+        progress = {"memory": self.memory, "episode": episode}
         pickle.dump(progress, open(self.progress_file, "wb"))
 
     def update_memory(self, states, actions, rewards, imitation_learning=False):
