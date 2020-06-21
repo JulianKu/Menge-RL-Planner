@@ -386,6 +386,8 @@ class ModelPredictiveRL(Policy):
         d_min2human = point_to_segment_dist(d_0, d_1, origin) - human_states.radius - robot_state.radius
         if d_min2human.size == 0:
             d_min2human = np.inf
+        else:
+            d_min2human = d_min2human.min()
 
         # collision detection with obstacles
         if self.kinematics == 'holonomic':
@@ -399,6 +401,8 @@ class ModelPredictiveRL(Policy):
         d_min2obs = point_to_segment_dist(robot_state.position, end_position, obstacles.position) - robot_state.radius
         if d_min2obs.size == 0:
             d_min2obs = np.inf
+        else:
+            d_min2obs = d_min2obs.min()
 
         # check if reaching the goal
         reaching_goal = norm(end_position - robot_state.goal_position) < robot_state.radius + robot_state.goal_radius
