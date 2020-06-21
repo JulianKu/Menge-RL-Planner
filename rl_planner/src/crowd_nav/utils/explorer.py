@@ -77,7 +77,7 @@ class Explorer(object):
                 print("DONE")
 
             # save replay buffer every 50th episode
-            if i % 50 == 0 or (episode is not None and episode % 50 == 0):
+            if self.current_episode % 50 == 0:
                 self.save_memory()
 
             if isinstance(info, ReachGoal):
