@@ -47,7 +47,7 @@ def main(args):
     def signal_handler(signalNumber, frame):
         print("Received signal: {}".format(signal.Signals(signalNumber).name))
         try:
-            if hasattr(explorer, "save_memory"):
+            if hasattr(explorer, "save_memory") and explorer.progress_file is not None:
                 explorer.save_memory()
         except NameError:
             pass
@@ -125,7 +125,7 @@ def main(args):
     env_config = config.EnvConfig(args.debug)
 
     new_scenario = args.scenario  # type: str
-    if new_scenario:
+    if new_scenario is not None:
         assert os.path.exists(new_scenario) and new_scenario.endswith(".xml"), "specified scenario is invalid"
         env_config.sim.scenario = new_scenario
 
@@ -316,7 +316,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--test_after_every_eval', default=False, action='store_true')
     parser.add_argument('--randomseed', type=int, default=17)
-    parser.add_argument('--scenario', type=str)
+    parser.add_argument('--scenario', type=str, default=None)
 
     # arguments for GCN
     # parser.add_argument('--X_dim', type=int, default=32)

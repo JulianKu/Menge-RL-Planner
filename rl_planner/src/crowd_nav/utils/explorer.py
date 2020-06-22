@@ -9,7 +9,7 @@ from menge_gym.envs.utils.info import *
 
 
 class Explorer(object):
-    def __init__(self, env, robot, device, writer, progress_file, memory=None, gamma=None, target_policy=None):
+    def __init__(self, env, robot, device, writer, progress_file=None, memory=None, gamma=None, target_policy=None):
         self.env = env
         self.robot = robot
         self.device = device
@@ -58,7 +58,7 @@ class Explorer(object):
             while not done:
                 step_no += 1
                 print("######################################")
-                print("RUNNING EPISODE {}, STEP NUMBER {}".format(episode, step_no))
+                print("RUNNING EPISODE {}, STEP NUMBER {}".format(self.current_episode, step_no))
                 print("######################################")
                 action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
@@ -77,7 +77,7 @@ class Explorer(object):
                 print("DONE")
 
             # save replay buffer every 50th episode
-            if self.current_episode % 50 == 0:
+            if (self.progress_file is not None) and (self.current_episode % 50 == 0):
                 self.save_memory()
 
             if isinstance(info, ReachGoal):
@@ -154,6 +154,7 @@ class Explorer(object):
         self.saved_episodes = episode
 
     def save_memory(self):
+        assert self.progress_file is not None, "progress file needs to be set to save memory and current episode"
         print("Dump memory to file")
         episode = self.current_episode
         if self.saved_episodes is not None:
