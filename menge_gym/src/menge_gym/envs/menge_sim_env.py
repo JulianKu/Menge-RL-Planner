@@ -445,6 +445,9 @@ class MengeGym(gym.Env):
         cmd_vel_msg.angular.z = angle_action
         self._pub_cmd_vel.publish(cmd_vel_msg)
         self.cmd_vel_msg = cmd_vel_msg
+        # publish message twice (second time without change of angle) to avoid oscillation
+        cmd_vel_msg.angular.z = 0
+        self._pub_cmd_vel.publish(cmd_vel_msg)
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
