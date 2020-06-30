@@ -513,9 +513,10 @@ class MengeGym(gym.Env):
                 # raise TimeoutError("Simulator node not responding")
                 rp.logerr("Timeout reached, setting empty poses")
                 rp.loginfo("Global Time is set to time limit to start new instance")
-                self.global_time = self.config.time_limit
+                self.global_time = - 1.0
                 self._crowd_pose = np.array([], dtype=float).reshape(0, 4)
                 self._robot_pose = np.array([], dtype=float).reshape(0, 4)
+                break
 
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
@@ -530,7 +531,13 @@ class MengeGym(gym.Env):
             reward, done, info
         """
 
-        if self.global_time + self.config.time_step > self.config.time_limit:
+        if self.global_time < 0:
+            # Communication with Menge simulator timed out
+            reward = 0
+            done = True
+            info = InterfaceTimeout()
+            return reward, done, info
+        elif self.global_time + self.config.time_step > self.config.time_limit:
             # handle reward, etc. for simulation reaching time limit
             reward = 0
             done = True

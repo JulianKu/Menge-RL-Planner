@@ -66,6 +66,15 @@ class Explorer(object):
                 actions.append(action)
                 rewards.append(reward)
 
+                if isinstance(info, InterfaceTimeout):
+                    # env requires reset, because it went into an interface error
+                    print("{} - Simulator Interface timed out, resetting env".format(info))
+                    ob = self.env.reset(phase)
+                    done = False
+                    states = []
+                    actions = []
+                    rewards = []
+                    step_no = 0
                 if isinstance(info, Discomfort):
                     discomfort += 1
                     comfort_min_dist.append(info.min_dist)
