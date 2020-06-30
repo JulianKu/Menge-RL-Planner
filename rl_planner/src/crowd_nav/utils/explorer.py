@@ -6,6 +6,7 @@ import torch
 from tqdm import tqdm
 from collections import Counter
 from menge_gym.envs.utils.info import *
+from crowd_nav.utils.utils import human_poses_from_traj, human_traj_ros_msg
 
 
 class Explorer(object):
@@ -24,7 +25,7 @@ class Explorer(object):
 
     # @profile
     def run_k_episodes(self, k, phase, update_memory=False, imitation_learning=False, episode=None, epoch=None,
-                       print_failure=False):
+                       print_failure=False, visualize=False):
         self.robot.policy.set_phase(phase)
         success_times = []
         collision_times = []
@@ -62,6 +63,13 @@ class Explorer(object):
                 print("######################################")
                 action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
+                if visualize:
+                    traj_msg = None
+                    if hasattr(self.robot.policy, "get_traj"):
+                        traj = self.robot.policy.get_traj()
+                        human_traj = map(human_poses_from_traj, traj)
+                        traj_msg = human_traj_ros_msg(human_traj)
+                    self.env.render(mode="ros", human_traj_prediction_msg=traj_msg)
                 states.append(self.robot.policy.last_state)
                 actions.append(action)
                 rewards.append(reward)

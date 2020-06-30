@@ -6,12 +6,14 @@ import numpy as np
 from os import path
 import rospy as rp
 import xml.etree.ElementTree as ElT
-from geometry_msgs.msg import PoseArray, PoseStamped, Twist
-from visualization_msgs.msg import MarkerArray
+from geometry_msgs.msg import PoseArray, PoseStamped, Twist, Quaternion
+from visualization_msgs.msg import MarkerArray, Marker
+from nav_msgs.msg import Path, Odometry
 from std_msgs.msg import UInt8, Float32
+from tf.transformations import quaternion_from_euler
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
-from .utils.ros import obstacle2array, marker2array, ROSHandle
+from .utils.ros import obstacle2array, marker2array, goal2msg, ROSHandle
 from .utils.params import goal2array, get_robot_initial_position, parseXML
 from .utils.info import *
 from .utils.tracking import Sort, KalmanTracker
@@ -61,6 +63,7 @@ class MengeGym(gym.Env):
         self.config.robot_lf_ratio = None
         self.robot_motion_model = None  # type: Union[ModifiedAckermannModel, None]
         self.goal = None
+        self.goal_msg = None  # type: Union[Marker, None]
         self.robot_const_state = None
 
         # Reward variables
@@ -75,6 +78,8 @@ class MengeGym(gym.Env):
         # Observation variables
         self._crowd_pose = None  # type: Union[None, np.ndarray]
         self._robot_pose = None  # type: Union[None, np.ndarray]
+        self._crowd_pose_list = []  # type: List[np.ndarray]
+        self._robot_pose_list = []  # type: List[PoseStamped]
         self._static_obstacles = np.array([], dtype=float).reshape(-1, 2)
         self.rob_tracker = None
         self.ped_tracker = None
@@ -85,6 +90,7 @@ class MengeGym(gym.Env):
         self._angles = None
         self.action_array = None
         self._action = None  # type: Union[None, np.ndarray]
+        self.cmd_vel_msg = None
 
         # Schedule variables
         self.phase = None
@@ -97,7 +103,11 @@ class MengeGym(gym.Env):
         self._sim_pid = None
         self._pub_step = None
         self._pub_cmd_vel = None
-        self._subscribers = [] # type: List[rp.Subscriber]
+        self._pub_odom = None
+        self._pub_goal = None
+        self._pub_rob_path = None
+        self._pub_human_predictions = None
+        self._subscribers = []  # type: List[rp.Subscriber]
         self.global_time = None
         self._prev_time = None
 
@@ -332,6 +342,7 @@ class MengeGym(gym.Env):
             goals_array = goals_array[mask]
 
         self.goal = goals_array[np.random.randint(len(goals_array))]
+        self.goal_msg = goal2msg(self.goal)
         # set constant part of the robot's state
         self.robot_const_state = np.concatenate((self.goal, [self.config.robot_v_pref])).reshape(1, 4)
 
@@ -356,6 +367,10 @@ class MengeGym(gym.Env):
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
         self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True, latch=True)
         self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
+        self._pub_odom = rp.Publisher('odom', Odometry, queue_size=1)
+        self._pub_goal = rp.Publisher('goal', Marker, queue_size=1)
+        self._pub_rob_path = rp.Publisher('rob_path', Path, queue_size=1)
+        self._pub_human_predictions = rp.Publisher("human_pred", MarkerArray, queue_size=1, tcp_nodelay=True)
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
@@ -387,6 +402,13 @@ class MengeGym(gym.Env):
 
         # update list of robot poses + pointer to current position
         self._robot_pose = np.array([x, y, phi, self.config.robot_radius]).reshape(1, 4)
+        # add unique poses to pose list for path visualization
+        if not self._robot_pose_list or not self._robot_pose_list[-1].pose == msg.pose:
+            pose_stamped = PoseStamped()
+            pose_stamped.pose = msg.pose
+            pose_stamped.header.frame_id = "map"
+            pose_stamped.header.stamp = rp.Time.now()
+            self._robot_pose_list.append(pose_stamped)
         rp.logdebug('Robot Pose callback done')
 
     def _sim_time_callback(self, msg: Float32):
@@ -422,6 +444,7 @@ class MengeGym(gym.Env):
         cmd_vel_msg.linear.x = velocity_action
         cmd_vel_msg.angular.z = angle_action
         self._pub_cmd_vel.publish(cmd_vel_msg)
+        self.cmd_vel_msg = cmd_vel_msg
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
@@ -691,33 +714,71 @@ class MengeGym(gym.Env):
         self.initial_robot_pos = None
         self.sample_goal(exclude_initial=True)
 
+        # Reset pose lists
+        self._robot_pose_list = []
+        self._crowd_pose_list = []
+
         # perform idle action and return observation
         # return self.step(np.array([0, 0], dtype=np.int32))[0]
         return self.step(None)[0]
 
-    def render(self, mode='human', close=False):
+    def render(self, mode='human', close=False, human_traj_prediction_msg=None):
         """
         render environment information to screen
         """
         if close:
             self.close()
-        states = self.observation  # type: JointState
-        rob_state = states.robot_state.observable_state
-        ped_states = states.human_states.state
-        ped_identifiers = states.human_states.get_identifiers()
-        if len(rob_state) or len(ped_states):
-            rp.loginfo('Tracked Objects')
-            combined_state = np.concatenate((rob_state, ped_states), axis=0)
-            row_labels = ['human {}'.format(int(i)) for i in ped_identifiers]
-            if len(rob_state):
-                row_labels.insert(0, 'robot')
-            state_str = format_array(combined_state,
-                                     row_labels=row_labels,
-                                     col_labels=['x', 'y', 'phi', 'r', 'x_dot', 'y_dot', 'omega_dot'])
-            rp.loginfo('\n' + state_str)
+
+        if mode == "human":
+            states = self.observation  # type: JointState
+            rob_state = states.robot_state.observable_state
+            ped_states = states.human_states.state
+            ped_identifiers = states.human_states.get_identifiers()
+            if len(rob_state) or len(ped_states):
+                rp.loginfo('Tracked Objects')
+                combined_state = np.concatenate((rob_state, ped_states), axis=0)
+                row_labels = ['human {}'.format(int(i)) for i in ped_identifiers]
+                if len(rob_state):
+                    row_labels.insert(0, 'robot')
+                state_str = format_array(combined_state,
+                                         row_labels=row_labels,
+                                         col_labels=['x', 'y', 'phi', 'r', 'x_dot', 'y_dot', 'omega_dot'])
+                rp.loginfo('\n' + state_str)
+            else:
+                rp.logwarn("No objects tracked")
+            rp.loginfo('\nNumber of static obstacles: %d\n' % len(self._static_obstacles))
+
+        elif mode == "ros":
+            current_time = rp.Time.now()
+            # publish robot path
+            path_msg = Path()
+            path_msg.poses = self._robot_pose_list
+            path_msg.header.frame_id = "map"
+            path_msg.header.stamp = current_time
+            self._pub_rob_path.publish(path_msg)
+
+            odom = Odometry()
+            odom.header.frame_id = "odom"
+            odom.header.stamp = current_time
+            if isinstance(self.robot_motion_model, ModifiedAckermannModel):
+                center_orientation = self.robot_motion_model.orientation
+                center_position = self.robot_motion_model.pos_center
+                odom.pose.pose.position.x = float(center_position[0])
+                odom.pose.pose.position.y = float(center_position[1])
+                quat = quaternion_from_euler(0., 0., float(center_orientation))
+                odom.pose.pose.orientation = Quaternion(*quat)
+            else:
+                odom.pose.pose = self._robot_pose_list[-1].pose
+            odom.twist.twist = self.cmd_vel_msg
+            self._pub_odom.publish(odom)
+
+            self.goal_msg.header.stamp = current_time
+            self._pub_goal.publish(self.goal_msg)
+
+            if human_traj_prediction_msg is not None:
+                self._pub_human_predictions.publish(human_traj_prediction_msg)
         else:
-            rp.logwarn("No objects tracked")
-        rp.loginfo('\nNumber of static obstacles: %d\n' % len(self._static_obstacles))
+            raise NotImplementedError("Only modes 'human' and 'ros' are supported")
 
     def close(self):
         """

@@ -64,6 +64,32 @@ def marker2array(marker: Marker) -> Tuple[float, float, float, float]:
     return x, y, phi, r
 
 
+def goal2msg(goal):
+    """
+    creates Marker message from goal
+    :param goal: np.ndarray goal (x,y, radius)
+    :return: Marker message
+    """
+    goal_msg = Marker()
+    goal_msg.header.frame_id = "map"
+    goal_msg.type = goal_msg.CYLINDER
+    goal_msg.action = goal_msg.ADD
+    goal = goal
+    goal_msg.pose.position.x = goal[0]
+    goal_msg.pose.position.y = goal[1]
+    goal_msg.pose.orientation.w = 1.0
+    goal_diameter = 2 * goal[2]
+    goal_msg.scale.x = goal_diameter
+    goal_msg.scale.y = goal_diameter
+    goal_msg.scale.z = 0.2
+    goal_msg.color.a = 0.7
+    goal_msg.color.r = 1.0
+    goal_msg.color.g = 0.9
+    goal_msg.color.b = 0.0
+
+    return goal_msg
+
+
 def isProcessRunning(process_name: str) -> Tuple[bool, int]:
     """
     checks whether a process is already running
