@@ -20,6 +20,7 @@ from .utils.tracking import Sort, KalmanTracker
 from .utils.format import format_array
 from .utils.state import FullState, ObservableState, ObstacleState, JointState
 from .utils.motion_model import ModifiedAckermannModel
+from .utils.utils import DeviationWindow
 from typing import List, Union
 
 
@@ -90,6 +91,7 @@ class MengeGym(gym.Env):
         self._angles = None
         self.action_array = None
         self._action = None  # type: Union[None, np.ndarray]
+        self._angle_window = DeviationWindow(5)
         self.cmd_vel_msg = None
 
         # Schedule variables
@@ -211,6 +213,7 @@ class MengeGym(gym.Env):
         self.sample_goal(exclude_initial=True)
 
         # Reward
+        self.config.oscillation_scale = config.reward.oscillation_scale
         self.config.success_reward = config.reward.success_reward
         self.config.collision_penalty_crowd = config.reward.collision_penalty_crowd
         self.config.discomfort_dist = config.reward.discomfort_dist
@@ -448,6 +451,7 @@ class MengeGym(gym.Env):
         # publish message twice (second time without change of angle) to avoid oscillation
         cmd_vel_msg.angular.z = 0
         self._pub_cmd_vel.publish(cmd_vel_msg)
+        self._angle_window(angle_action)
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
@@ -614,6 +618,8 @@ class MengeGym(gym.Env):
             else:
                 d_goal = np.inf
 
+            oscillation_reward = - self.config.oscillation_scale * self._angle_window.mean_of_abs()
+
             # collision with crowd
             if d_min_crowd < 0:
                 reward = self.config.collision_penalty_crowd
@@ -647,6 +653,9 @@ class MengeGym(gym.Env):
                 reward = 0
                 done = False
                 info = Nothing()
+
+            reward += oscillation_reward
+
             rp.logdebug('Current reward={} ({})'.format(reward, info))
             return reward, done, info
 
