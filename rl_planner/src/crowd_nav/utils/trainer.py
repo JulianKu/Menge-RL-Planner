@@ -185,7 +185,6 @@ class MPRLTrainer(object):
                                                     and isinstance(human_states[1], tuple) else 1
                     next_human_states_est = human_mask * next_human_states_est
 
-
                     if next_human_identifiers is not None and next_human_identifiers_est is not None:
                         # find matching indices between next_human_states and estimated next_human_states
                         compareview_id = next_human_identifiers.expand(

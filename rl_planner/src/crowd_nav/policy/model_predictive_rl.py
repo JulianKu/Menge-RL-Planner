@@ -153,7 +153,11 @@ class ModelPredictiveRL(Policy):
             self.rotation_constraint = env_config.rotation_constraint
         else:
             self.rotation_constraint = config.robot.action_space.rotation_constraint
-        self.reward = config.reward
+
+        if env_config is not None and hasattr(env_config, "reward"):
+            self.reward = env_config.reward
+        else:
+            self.reward = config.reward
 
     def set_device(self, device):
         self.device = device
@@ -217,7 +221,7 @@ class ModelPredictiveRL(Policy):
         torch.save(self.get_state_dict(), file)
 
     def load_model(self, file):
-        checkpoint = torch.load(file)
+        checkpoint = torch.load(file, map_location=self.device if self.device is not None else "cpu")
         self.load_state_dict(checkpoint)
 
     def predict(self, state):
@@ -226,8 +230,6 @@ class ModelPredictiveRL(Policy):
         The input to the value network is always of shape (batch_size, # humans, rotated joint state length)
 
         """
-
-        # TODO: transform state to tuple (maybe replace JointState class) and replace Action space
         if self.phase is None or self.device is None:
             raise AttributeError('Phase, device attributes have to be set!')
         if self.phase == 'train' and self.epsilon is None:
@@ -326,7 +328,7 @@ class ModelPredictiveRL(Policy):
         trajs = []
 
         for action_idx in action_indices_clipped:
-            action = self.action_array[action_idx]
+            action = self.action_array[tuple(action_idx)]
             next_state_est = self.state_predictor(state, action)
             reward_est = self.estimate_reward(state, action)
             next_value, next_traj = self.V_planning(next_state_est, depth - 1, self.planning_width)

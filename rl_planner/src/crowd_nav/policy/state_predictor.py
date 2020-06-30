@@ -41,7 +41,7 @@ class StatePredictor(nn.Module):
                 human_identifiers = state[1][1][1]
             else:
                 assert len(state[1][1].shape) == 3
-                human_identifiers = None
+                human_identifiers = state[1][1]
         else:
             assert len(state[1].shape) == 3
             human_identifiers = None
@@ -75,7 +75,6 @@ class StatePredictor(nn.Module):
         # px, py, theta, radius, vx, vy, theta_dot, gx, gy, g_r, v_pref
         next_state = robot_state.clone().squeeze()
         if self.kinematics == 'holonomic':
-            # TODO: velocity update might need refinement (temporal dynamics)
             next_angle = next_state[2] + action[1]
             vx = action[0] * np.cos(next_angle)
             vy = action[0] * np.sin(next_angle)

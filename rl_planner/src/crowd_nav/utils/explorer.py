@@ -73,11 +73,9 @@ class Explorer(object):
                 if isinstance(info, Clearance):
                     clearance += 1
                     clearance_min_dist.append(info.min_dist)
-            if episode == 10:
-                print("DONE")
 
             # save replay buffer every 50th episode
-            if (self.progress_file is not None) and (self.current_episode % 50 == 0):
+            if (self.progress_file is not None) and (self.current_episode % 50 == 0) and self.current_episode != 0:
                 self.save_memory()
 
             if isinstance(info, ReachGoal):

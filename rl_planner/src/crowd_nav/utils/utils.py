@@ -2,6 +2,7 @@ import numpy as np
 
 eps = np.finfo(float).eps
 
+
 def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     """
     Calculate the shortest distance between point x and all line segments with two endpoints a[i], b[i]

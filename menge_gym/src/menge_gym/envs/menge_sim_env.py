@@ -685,7 +685,8 @@ class MengeGym(gym.Env):
         self.sample_goal(exclude_initial=True)
 
         # perform idle action and return observation
-        return self.step(np.array([0, 0], dtype=np.int32))[0]
+        # return self.step(np.array([0, 0], dtype=np.int32))[0]
+        return self.step(None)[0]
 
     def render(self, mode='human', close=False):
         """

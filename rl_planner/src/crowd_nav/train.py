@@ -220,9 +220,9 @@ def main(args):
         il_policy.safety_space = safety_space
         robot.set_policy(il_policy)
         explorer.run_k_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
-        saved_episodes = 0
         trainer.optimize_epoch(il_epochs)
         policy.save_model(il_weight_file)
+        saved_episodes = 0
         logging.info('Finish imitation learning. Weights saved.')
         logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
 
@@ -233,25 +233,22 @@ def main(args):
     robot.set_policy(policy)
     trainer.set_learning_rate(rl_learning_rate)
     # fill the memory pool with some RL experience
-    if args.resume and saved_episodes < 100:
+    if args.resume:
         robot.policy.set_epsilon(epsilon_end)
         explorer.set_saved_episodes(saved_episodes)
-        explorer.run_k_episodes(100 - saved_episodes, 'train', update_memory=True, episode=0)
-        saved_episodes = 0
+        explorer.run_k_episodes(100, 'train', update_memory=True, episode=0)
     logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
-    episode = 0
     best_val_reward = -1
     best_val_model = None
+
     # evaluate the model after imitation learning
+    logging.info('Evaluate the model instantly after imitation learning on the validation cases')
+    explorer.run_k_episodes(env.case_size['val'], 'val', episode=0)
+    explorer.log('val', 0)
 
-    if episode % evaluation_interval == 0:
-        logging.info('Evaluate the model instantly after imitation learning on the validation cases')
-        explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode)
-        explorer.log('val', episode // evaluation_interval)
-
-        if args.test_after_every_eval:
-            explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
-            explorer.log('test', episode // evaluation_interval)
+    if args.test_after_every_eval:
+        explorer.run_k_episodes(env.case_size['test'], 'test', episode=0, print_failure=True)
+        explorer.log('test', 0)
 
     explorer.set_saved_episodes(saved_episodes)
     episode = 0
