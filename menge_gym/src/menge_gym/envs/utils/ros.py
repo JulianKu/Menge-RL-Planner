@@ -192,6 +192,7 @@ class ROSHandle:
         """
         terminate all ros processes and the master itself
         """
+        self.log_output()
         loginfo("Trying to kill all launched processes first")
         for pid in self.processes:
             process = self.processes[pid]
@@ -211,14 +212,13 @@ class ROSHandle:
         #     self.master_process.wait()
         #     self.master_process = None
 
-        self.log_output()
-
     def terminateOne(self, pid):
         """
         terminate one ros process by its pid
 
         :param pid: process id for process to kill
         """
+        self.log_output()
         loginfo("trying to kill process with pid: %s" % pid)
         proc = None
         try:
@@ -239,5 +239,3 @@ class ROSHandle:
             thr.join()
         except KeyError:
             print("Thread already terminated")
-
-        self.log_output()
