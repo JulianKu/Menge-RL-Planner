@@ -140,11 +140,11 @@ class JointState(object):
             obstacle_tensor = obstacle_tensor.unsqueeze(0)
 
         if device is not None:
-            robot_state_tensor.to(device)
-            human_states_tensor.to(device)
+            robot_state_tensor = robot_state_tensor.to(device)
+            human_states_tensor = human_states_tensor.to(device)
             if human_identifiers is not None:
-                human_identifiers.to(device)
-            obstacle_tensor.to(device)
+                human_identifiers = human_identifiers.to(device)
+            obstacle_tensor = obstacle_tensor.to(device)
 
         return robot_state_tensor, (human_states_tensor, human_identifiers), obstacle_tensor
 

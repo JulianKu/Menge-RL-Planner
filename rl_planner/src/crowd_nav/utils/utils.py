@@ -1,6 +1,12 @@
 import numpy as np
+from typing import Union, Tuple
+from torch import Tensor
+from rospy import Time, Duration
+from geometry_msgs.msg import Point
+from visualization_msgs.msg import MarkerArray, Marker
 
 eps = np.finfo(float).eps
+
 
 def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     """
@@ -75,3 +81,62 @@ def mahalanobis_dist_nd(x: np.ndarray, y: np.ndarray):
 
     return np.sqrt(np.einsum('nj,jk,nk->n', delta, inv, delta)).reshape(return_shape)
 
+
+def human_poses_from_traj(traj_entry: Tuple[Tuple[Tensor,
+                                                  Union[Tensor,
+                                                       Tuple[Tensor, Tensor],
+                                                       Tuple[Tensor, Tuple[Tensor, Tensor]]],
+                                                  Tensor],
+                                            np.ndarray,
+                                            int]) -> np.ndarray:
+    human_state = traj_entry[0][1]
+    if isinstance(human_state, Tensor):
+        human_tensor = human_state
+    elif isinstance(human_state, tuple):
+        if isinstance(human_state[1], Tensor):
+            human_tensor = human_state[0]
+        elif isinstance(human_state[1], tuple):
+            human_tensor = human_state[1][0]
+        else:
+            raise NotImplementedError("Wrong trajectory format")
+    else:
+        raise NotImplementedError("Wrong trajectory format")
+    human_pose = human_tensor.squeeze(0)[:, :2].cpu().data.numpy()
+
+    return human_pose
+
+
+def human_traj_ros_msg(traj_pose_list) -> MarkerArray:
+    traj_marker_array = MarkerArray()
+
+    for step, traj_pose in enumerate(traj_pose_list):
+        if len(traj_pose) == 0:
+            continue
+        human_poses_marker = Marker()
+        human_poses_marker.header.frame_id = "map"
+        human_poses_marker.id = step + 1
+        human_poses_marker.ns = "human_pred"
+        human_poses_marker.type = human_poses_marker.SPHERE_LIST
+        human_poses_marker.action = human_poses_marker.ADD
+        human_poses_marker.lifetime = Duration(0.8)
+
+        scale = 0.5 / (0.2 * step + 1.2)
+        human_poses_marker.scale.x = scale
+        human_poses_marker.scale.y = scale
+        human_poses_marker.scale.z = 0.1
+        human_poses_marker.pose.orientation.w = 1
+
+        human_poses_marker.color.a = 0.6
+        human_poses_marker.color.r = 1.0
+        human_poses_marker.color.g = 0.1
+        human_poses_marker.color.b = 0.0
+
+        for human_pose in traj_pose:
+            human_pnt = Point()
+            human_pnt.x = human_pose[0]
+            human_pnt.y = human_pose[1]
+            human_poses_marker.points.append(human_pnt)
+
+        traj_marker_array.markers.append(human_poses_marker)
+
+    return traj_marker_array

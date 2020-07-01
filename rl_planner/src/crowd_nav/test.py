@@ -8,6 +8,10 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import gym
+import subprocess
+from signal import SIGINT
+from psutil import Process as psutilProcess
+from datetime import datetime
 from crowd_nav.utils.explorer import Explorer
 from crowd_nav.policy.policy_factory import policy_factory
 from crowd_nav.utils.robot import Robot
@@ -53,9 +57,28 @@ def main(args):
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
 
+    # configure environment
+    env_config = config.EnvConfig(args.debug)
+
+    new_scenario = args.test_scenario  # type: str
+    if new_scenario is not None:
+        assert os.path.exists(new_scenario) and new_scenario.endswith(".xml"), "specified scenario is invalid"
+        env_config.sim.scenario = new_scenario
+    else:
+        new_scenario = env_config.sim.scenario
+
+    if args.human_num is not None:
+        env_config.sim.human_num = args.human_num
+
+    env = gym.make("menge_gym:MengeGym-v0")
+    env.configure(env_config)
+    if hasattr(env, 'roshandle'):
+        env.setup_ros_connection()
+
     # configure policy
     policy_config = config.PolicyConfig(args.debug)
-    policy = policy_factory[policy_config.name]()
+    policy_name = policy_config.name
+    policy = policy_factory[policy_name]()
     if args.planning_depth is not None:
         policy_config.model_predictive_rl.do_action_clip = True
         policy_config.model_predictive_rl.planning_depth = args.planning_depth
@@ -65,43 +88,32 @@ def main(args):
     if args.sparse_search:
         policy_config.model_predictive_rl.sparse_search = True
 
-    policy.configure(policy_config)
+    policy_action_space = (env.action_space, env.action_array)
+    policy.configure(policy_config, env.config, policy_action_space)
+
     if policy.trainable:
         if args.model_dir is None:
             parser.error('Trainable policy must be specified with a model weights directory')
         policy.load_model(model_weights)
 
-    # configure environment
-    env_config = config.EnvConfig(args.debug)
-
-    if args.human_num is not None:
-        env_config.sim.human_num = args.human_num
-    env = gym.make('CrowdSim-v0')
-    env.configure(env_config)
-
-    if args.square:
-        env.test_scenario = 'square_crossing'
-    if args.circle:
-        env.test_scenario = 'circle_crossing'
-    if args.test_scenario is not None:
-        env.test_scenario = args.test_scenario
+    policy.set_phase(args.phase)
+    policy.set_device(device)
 
     robot = Robot(env_config, 'robot')
-    robot.time_step = env.time_step
+    robot.time_step = env.config.time_step
     robot.set_policy(policy)
-    explorer = Explorer(env, robot, device, None, gamma=0.9)
 
     train_config = config.TrainConfig(args.debug)
     epsilon_end = train_config.train.epsilon_end
     if not isinstance(robot.policy, ORCA):
         robot.policy.set_epsilon(epsilon_end)
 
-    policy.set_phase(args.phase)
-    policy.set_device(device)
+    explorer = Explorer(env, robot, device, None, gamma=0.9)
+
     # set safety space for ORCA in non-cooperative simulation
     if isinstance(robot.policy, ORCA):
-        if env.robot_visibility:
-            robot.policy.safety_space = args.safety_space
+        if env.config.robot_visibility:
+            robot.policy.safety_space = 0
         else:
             robot.policy.safety_space = args.safety_space
         logging.info('ORCA agent buffer: %f', robot.policy.safety_space)
@@ -109,68 +121,65 @@ def main(args):
     policy.set_env(env)
 
     if args.visualize:
-        rewards = []
-        ob = env.reset(args.phase, args.test_case)
-        done = False
-        # TODO:
-        #  Replace robot here with env action
-        last_pos = np.array(robot.get_position())
-        while not done:
-            action = robot.act(ob)
-            ob, _, done, info = env.step(action)
-            rewards.append(_)
-            current_pos = np.array(robot.get_position())
-            logging.debug('Speed: %.2f', np.linalg.norm(current_pos - last_pos) / robot.time_step)
-            last_pos = current_pos
-        gamma = 0.9
-        cumulative_reward = sum([pow(gamma, t * robot.time_step * robot.v_pref)
-             * reward for t, reward in enumerate(rewards)])
-
-        if args.traj:
-            env.render('traj', args.video_file)
+        # -a makes record all topics, -q suppresses console output
+        record_expr = ["rosbag", "record", "-aq"]
+        if args.bag_file is not None:
+            rec_file = args.bag_file
+            if not rec_file.endswith(".bag"):
+                rec_file += ".bag"
         else:
-            if args.video_dir is not None:
-                if policy_config.name == 'gcn':
-                    args.video_file = os.path.join(args.video_dir, policy_config.name + '_' + policy_config.gcn.similarity_function)
-                else:
-                    args.video_file = os.path.join(args.video_dir, policy_config.name)
-                args.video_file = args.video_file + '_' + args.phase + '_' + str(args.test_case) + '.mp4'
-            env.render('video', args.video_file)
-        logging.info('It takes %.2f seconds to finish. Final status is %s, cumulative_reward is %f', env.global_time, info, cumulative_reward)
-        if robot.visible and info == 'reach goal':
-            human_times = env.get_human_times()
-            logging.info('Average time for humans to reach goal: %.2f', sum(human_times) / len(human_times))
+            date = datetime.now().strftime("%d_%m_%Y")
+            scenario_name = os.path.splitext(os.path.split(new_scenario)[1])[0]
+            rec_file = "_".join((scenario_name, args.phase, policy_name, date)) + ".bag"
+        rec_dir = args.bag_dir
+        if not os.path.isdir(rec_dir):
+            os.makedirs(rec_dir)
+        rec_full_path = os.path.join(rec_dir, rec_file)
+        record_expr.extend(["-O", rec_full_path])
+
+        # # it would be possible to add additional args for rosbag record (e.g. max filesize, duration,
+        # #                                                                including/excluding topics)
+        # # see http://wiki.ros.org/rosbag/Commandline#record
+        # add_args = []
+        # for arg in add_args:
+        #     record_expr.append(arg)
+
+        # start rosbag record
+        print("Start recording bag file")
+        rosbag_proc = subprocess.Popen(record_expr)
+        # TODO: CONTINUE HERE (add visualization flag to explorer and down + corresponding messages)
+        explorer.run_k_episodes(env.case_size[args.phase], args.phase, print_failure=True, visualize=True)
+        # finish rosbag record
+        print("Stop recording bag file")
+        p = psutilProcess(rosbag_proc.pid)
+        for child in p.children(recursive=True):
+            # make sure all child processes are ended
+            child.send_signal(SIGINT)
+        rosbag_proc.wait()
+        rosbag_proc.send_signal(SIGINT)
     else:
         explorer.run_k_episodes(env.case_size[args.phase], args.phase, print_failure=True)
-        if args.plot_test_scenarios_hist:
-            test_angle_seeds = np.array(env.test_scene_seeds)
-            b = [i * 0.01 for i in range(101)]
-            n, bins, patches = plt.hist(test_angle_seeds, b, facecolor='g')
-            plt.savefig(os.path.join(args.model_dir, 'test_scene_hist.png'))
-            plt.close()
+
+    env.close()
+
+    return
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument('--config', type=str, default=None)
-    parser.add_argument('--policy', type=str, default='model_predictive_rl')
     parser.add_argument('-m', '--model_dir', type=str, default=None)
     parser.add_argument('--il', default=False, action='store_true')
     parser.add_argument('--rl', default=False, action='store_true')
     parser.add_argument('--gpu', default=False, action='store_true')
     parser.add_argument('-v', '--visualize', default=False, action='store_true')
     parser.add_argument('--phase', type=str, default='test')
-    parser.add_argument('-c', '--test_case', type=int, default=None)
-    parser.add_argument('--square', default=False, action='store_true')
-    parser.add_argument('--circle', default=False, action='store_true')
-    parser.add_argument('--video_file', type=str, default=None)
-    parser.add_argument('--video_dir', type=str, default=None)
-    parser.add_argument('--traj', default=False, action='store_true')
+    parser.add_argument('-b', '--bag_file', type=str, default=None)
+    parser.add_argument('--bag_dir', type=str, default='data/output')
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--human_num', type=int, default=None)
     parser.add_argument('--safety_space', type=float, default=0.2)
     parser.add_argument('--test_scenario', type=str, default=None)
-    parser.add_argument('--plot_test_scenarios_hist', default=True, action='store_true')
     parser.add_argument('-d', '--planning_depth', type=int, default=None)
     parser.add_argument('-w', '--planning_width', type=int, default=None)
     parser.add_argument('--sparse_search', default=False, action='store_true')

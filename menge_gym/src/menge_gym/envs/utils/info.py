@@ -6,6 +6,14 @@ class Timeout(object):
         return 'Timeout'
 
 
+class InterfaceTimeout(object):
+    def __init__(self):
+        pass
+
+    def __str__(self):
+        return 'InterfaceTimeout'
+
+
 class ReachGoal(object):
     def __init__(self):
         pass

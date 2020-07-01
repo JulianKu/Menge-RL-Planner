@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from functools import partial
 
 
 class MPRLTrainer(object):
@@ -65,7 +66,8 @@ class MPRLTrainer(object):
         if self.v_optimizer is None:
             raise ValueError('Learning rate is not set!')
         if self.data_loader is None:
-            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True, collate_fn=custom_collate)
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True,
+                                          collate_fn=partial(custom_collate, device=self.device))
 
         for epoch in range(num_epochs):
             epoch_v_loss = 0
@@ -141,7 +143,8 @@ class MPRLTrainer(object):
         if self.v_optimizer is None:
             raise ValueError('Learning rate is not set!')
         if self.data_loader is None:
-            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True, collate_fn=custom_collate)
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True,
+                                          collate_fn=partial(custom_collate, device=self.device))
         v_losses = 0
         s_losses = 0
         batch_count = 0
@@ -181,7 +184,6 @@ class MPRLTrainer(object):
                     human_mask = human_states[0] if isinstance(human_states, tuple) \
                                                     and isinstance(human_states[1], tuple) else 1
                     next_human_states_est = human_mask * next_human_states_est
-
 
                     if next_human_identifiers is not None and next_human_identifiers_est is not None:
                         # find matching indices between next_human_states and estimated next_human_states
@@ -308,12 +310,13 @@ class VNRLTrainer(object):
         return average_loss
 
 
-def custom_collate(batch):
+def custom_collate(batch, device):
     def pad(elems):
         # pad with zeros to unify length
         padded = torch.nn.utils.rnn.pad_sequence(elems, batch_first=True)
         # mask is 0 for padded elements, else 1
-        mask = [torch.Tensor(t.shape[0] * [[1.]]) if t.size(0) else torch.Tensor([[0.]]) for t in elems]
+        mask = [torch.Tensor(t.shape[0] * [[1.]]).to(device) if t.size(0)
+                else torch.Tensor([[0.]]).to(device) for t in elems]
         mask = torch.nn.utils.rnn.pad_sequence(mask, batch_first=True)
 
         return mask, padded

@@ -1,26 +1,31 @@
 import os
 import logging
 import copy
+import pickle
 import torch
 from tqdm import tqdm
 from collections import Counter
 from menge_gym.envs.utils.info import *
+from crowd_nav.utils.utils import human_poses_from_traj, human_traj_ros_msg
 
 
 class Explorer(object):
-    def __init__(self, env, robot, device, writer, memory=None, gamma=None, target_policy=None):
+    def __init__(self, env, robot, device, writer, progress_file=None, memory=None, gamma=None, target_policy=None):
         self.env = env
         self.robot = robot
         self.device = device
         self.writer = writer
+        self.progress_file = progress_file
         self.memory = memory
         self.gamma = gamma
         self.target_policy = target_policy
         self.statistics = None
+        self.current_episode = None
+        self.saved_episodes = None
 
     # @profile
     def run_k_episodes(self, k, phase, update_memory=False, imitation_learning=False, episode=None, epoch=None,
-                       print_failure=False):
+                       print_failure=False, visualize=False):
         self.robot.policy.set_phase(phase)
         success_times = []
         collision_times = []
@@ -49,13 +54,35 @@ class Explorer(object):
             states = []
             actions = []
             rewards = []
+            step_no = 0
+            self.current_episode = episode if episode is not None else i
             while not done:
+                step_no += 1
+                print("######################################")
+                print("RUNNING EPISODE {}, STEP NUMBER {}".format(self.current_episode, step_no))
+                print("######################################")
                 action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
+                if visualize:
+                    traj_msg = None
+                    if hasattr(self.robot.policy, "get_traj"):
+                        traj = self.robot.policy.get_traj()
+                        human_traj = map(human_poses_from_traj, traj)
+                        traj_msg = human_traj_ros_msg(human_traj)
+                    self.env.render(mode="ros", human_traj_prediction_msg=traj_msg)
                 states.append(self.robot.policy.last_state)
                 actions.append(action)
                 rewards.append(reward)
 
+                if isinstance(info, InterfaceTimeout):
+                    # env requires reset, because it went into an interface error
+                    print("{} - Simulator Interface timed out, resetting env".format(info))
+                    ob = self.env.reset(phase)
+                    done = False
+                    states = []
+                    actions = []
+                    rewards = []
+                    step_no = 0
                 if isinstance(info, Discomfort):
                     discomfort += 1
                     comfort_min_dist.append(info.min_dist)
@@ -63,6 +90,10 @@ class Explorer(object):
                 if isinstance(info, Clearance):
                     clearance += 1
                     clearance_min_dist.append(info.min_dist)
+
+            # save replay buffer every 50th episode
+            if (self.progress_file is not None) and (self.current_episode % 50 == 0) and self.current_episode != 0:
+                self.save_memory()
 
             if isinstance(info, ReachGoal):
                 success += 1
@@ -133,6 +164,18 @@ class Explorer(object):
                           average(average_returns)
 
         return self.statistics
+
+    def set_saved_episodes(self, episode: int):
+        self.saved_episodes = episode
+
+    def save_memory(self):
+        assert self.progress_file is not None, "progress file needs to be set to save memory and current episode"
+        print("Dump memory to file")
+        episode = self.current_episode
+        if self.saved_episodes is not None:
+            episode += self.saved_episodes
+        progress = {"memory": self.memory, "episode": episode}
+        pickle.dump(progress, open(self.progress_file, "wb"))
 
     def update_memory(self, states, actions, rewards, imitation_learning=False):
         if self.memory is None or self.gamma is None:

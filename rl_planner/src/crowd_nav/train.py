@@ -9,13 +9,28 @@ import importlib.util
 import torch
 import gym
 import copy
-import git
+import signal
+import pickle
 from tensorboardX import SummaryWriter
 from crowd_nav.utils.robot import Robot
 from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer
 from crowd_nav.utils.memory import ReplayMemory
 from crowd_nav.utils.explorer import Explorer
 from crowd_nav.policy.policy_factory import policy_factory
+
+
+def iterable_to_device(iterable, device):
+    new_iterable = []
+    for i in iterable:
+        res = None
+        if isinstance(i, torch.Tensor):
+            res = i.to(device)
+        elif hasattr(i, "__iter__"):
+            res = iterable_to_device(i, device)
+
+        if res is not None:
+            new_iterable.append(res)
+    return tuple(new_iterable)
 
 
 def set_random_seeds(seed):
@@ -28,6 +43,24 @@ def set_random_seeds(seed):
 
 
 def main(args):
+
+    def signal_handler(signalNumber, frame):
+        print("Received signal: {}".format(signal.Signals(signalNumber).name))
+        try:
+            if hasattr(explorer, "save_memory") and explorer.progress_file is not None:
+                explorer.save_memory()
+        except NameError:
+            pass
+        try:
+            env.close()
+        except NameError:
+            pass
+        sys.exit()
+
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
     # set current working directory (cwd) to this script's location
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
@@ -35,7 +68,10 @@ def main(args):
     # configure paths
     make_new_dir = True
     if os.path.exists(args.output_dir):
-        if args.overwrite:
+        if args.restart:
+            # do not overwrite existing progress on restart
+            make_new_dir = False
+        elif args.overwrite:
             shutil.rmtree(args.output_dir)
         else:
             key = input('Output directory already exists! Overwrite the folder? (y/n)')
@@ -66,7 +102,7 @@ def main(args):
     log_file = os.path.join(args.output_dir, 'output.log')
     il_weight_file = os.path.join(args.output_dir, 'il_model.pth')
     rl_weight_file = os.path.join(args.output_dir, 'rl_model.pth')
-
+    progress_file = os.path.abspath(os.path.join(args.output_dir, 'progress.p'))
     spec = importlib.util.spec_from_file_location('config', args.config)
     if spec is None:
         parser.error('Config file not found.')
@@ -80,8 +116,6 @@ def main(args):
     level = logging.INFO if not args.debug else logging.DEBUG
     logging.basicConfig(level=level, handlers=[stdout_handler, file_handler],
                         format='%(asctime)s, %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
-    repo = git.Repo(search_parent_directories=True)
-    logging.info('Current git head hash code: {}'.format(repo.head.object.hexsha))
     logging.info('Current config content is :{}'.format(config))
     device = torch.device("cuda:0" if torch.cuda.is_available() and args.gpu else "cpu")
     logging.info('Using device: %s', device)
@@ -89,6 +123,12 @@ def main(args):
 
     # configure environment
     env_config = config.EnvConfig(args.debug)
+
+    new_scenario = args.scenario  # type: str
+    if new_scenario is not None:
+        assert os.path.exists(new_scenario) and new_scenario.endswith(".xml"), "specified scenario is invalid"
+        env_config.sim.scenario = new_scenario
+
     env = gym.make("menge_gym:MengeGym-v0")
     env.configure(env_config, args.randomseed)
     if hasattr(env, 'roshandle'):
@@ -122,6 +162,19 @@ def main(args):
 
     # configure trainer and explorer
     memory = ReplayMemory(capacity)
+    saved_episodes = 0
+
+    if os.path.exists(progress_file):
+        print("Loading progress file")
+        progress = pickle.load(open(progress_file, "rb"))
+        memory = progress["memory"]
+        memory.memory = list(iterable_to_device(memory.memory, device))
+        print("Memory length: {}".format(len(memory)))
+        saved_episodes = progress["episode"]
+        if saved_episodes is None:
+            saved_episodes = 0
+        print("Saved episodes: {}".format(saved_episodes))
+
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
     optimizer = train_config.trainer.optimizer
@@ -134,19 +187,24 @@ def main(args):
                               share_graph_model=policy_config.model_predictive_rl.share_graph_model)
     else:
         trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
-    explorer = Explorer(env, robot, device, writer, memory, policy.gamma, target_policy=policy)
+    explorer = Explorer(env, robot, device, writer, progress_file, memory, policy.gamma, target_policy=policy)
+    explorer.set_saved_episodes(saved_episodes)
     # imitation learning
     if args.resume:
         if not os.path.exists(rl_weight_file):
             logging.error('RL weights does not exist')
-        model.load_state_dict(torch.load(rl_weight_file))
+        policy.load_state_dict(torch.load(rl_weight_file))
+        model = policy.get_model()
         rl_weight_file = os.path.join(args.output_dir, 'resumed_rl_model.pth')
         logging.info('Load reinforcement learning trained weights. Resume training')
     elif os.path.exists(il_weight_file):
-        model.load_state_dict(torch.load(il_weight_file))
+        policy.load_state_dict(torch.load(il_weight_file))
+        model = policy.get_model()
         logging.info('Load imitation learning trained weights.')
     else:
-        il_episodes = train_config.imitation_learning.il_episodes
+        il_episodes = train_config.imitation_learning.il_episodes - saved_episodes
+        if il_episodes < 0:
+            il_episodes = 0
         il_policy = train_config.imitation_learning.il_policy
         il_epochs = train_config.imitation_learning.il_epochs
         il_learning_rate = train_config.imitation_learning.il_learning_rate
@@ -164,6 +222,7 @@ def main(args):
         explorer.run_k_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
         trainer.optimize_epoch(il_epochs)
         policy.save_model(il_weight_file)
+        saved_episodes = 0
         logging.info('Finish imitation learning. Weights saved.')
         logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
 
@@ -176,24 +235,24 @@ def main(args):
     # fill the memory pool with some RL experience
     if args.resume:
         robot.policy.set_epsilon(epsilon_end)
+        explorer.set_saved_episodes(saved_episodes)
         explorer.run_k_episodes(100, 'train', update_memory=True, episode=0)
-        logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
-    episode = 0
+    logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
     best_val_reward = -1
     best_val_model = None
+
     # evaluate the model after imitation learning
+    logging.info('Evaluate the model instantly after imitation learning on the validation cases')
+    explorer.run_k_episodes(env.case_size['val'], 'val', episode=0)
+    explorer.log('val', 0)
 
-    if episode % evaluation_interval == 0:
-        logging.info('Evaluate the model instantly after imitation learning on the validation cases')
-        explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode)
-        explorer.log('val', episode // evaluation_interval)
+    if args.test_after_every_eval:
+        explorer.run_k_episodes(env.case_size['test'], 'test', episode=0, print_failure=True)
+        explorer.log('test', 0)
 
-        if args.test_after_every_eval:
-            explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
-            explorer.log('test', episode // evaluation_interval)
-
+    explorer.set_saved_episodes(saved_episodes)
     episode = 0
-    while episode < train_episodes:
+    while (episode + saved_episodes) < train_episodes:
         if args.resume:
             epsilon = epsilon_end
         else:
@@ -236,6 +295,9 @@ def main(args):
         torch.save(best_val_model, os.path.join(args.output_dir, 'best_val.pth'))
         logging.info('Save the best val model with the reward: {}'.format(best_val_reward))
     explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
+    env.close()
+
+    return
 
 
 if __name__ == '__main__':
@@ -246,10 +308,12 @@ if __name__ == '__main__':
     parser.add_argument('--overwrite', default=False, action='store_true')
     parser.add_argument('--weights', type=str)
     parser.add_argument('--resume', default=False, action='store_true')
+    parser.add_argument('--restart', default=False, action='store_true')
     parser.add_argument('--gpu', default=False, action='store_true')
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--test_after_every_eval', default=False, action='store_true')
     parser.add_argument('--randomseed', type=int, default=17)
+    parser.add_argument('--scenario', type=str, default=None)
 
     # arguments for GCN
     # parser.add_argument('--X_dim', type=int, default=32)

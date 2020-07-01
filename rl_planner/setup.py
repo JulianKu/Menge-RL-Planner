@@ -19,7 +19,6 @@ setup_args = generate_distutils_setup(
 
 setup(
     install_requires=[
-        'gitpython',
         'gym',
         'matplotlib',
         'numpy',
