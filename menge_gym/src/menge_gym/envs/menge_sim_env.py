@@ -460,7 +460,7 @@ class MengeGym(gym.Env):
 
         reward, done, info = self._get_reward_done_info()
 
-        if isinstance(info, Timeout) and (self._robot_pose is None or self._crowd_pose is None):
+        if isinstance(info, InterfaceTimeout) and (self._robot_pose is None or self._crowd_pose is None):
             # in Timeout cases, crowd_poses and robot_poses might be missing
             self._crowd_pose = np.array([], dtype=float).reshape(0, 4)
             self._robot_pose = np.array([], dtype=float).reshape(0, 4)
@@ -674,7 +674,7 @@ class MengeGym(gym.Env):
             self.case_counter[phase] += 1
 
         self.global_time = 0.0
-        self._prev_time = 0
+        self._prev_time = 0.0
         self.rob_tracker = None
         self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step)
 
