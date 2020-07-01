@@ -21,7 +21,7 @@ from .utils.format import format_array
 from .utils.state import FullState, ObservableState, ObstacleState, JointState
 from .utils.motion_model import ModifiedAckermannModel
 from .utils.utils import DeviationWindow
-from typing import List, Union
+from typing import List, Dict, Union
 
 
 class MengeGym(gym.Env):
@@ -103,13 +103,8 @@ class MengeGym(gym.Env):
         # ROS
         self.roshandle = None
         self._sim_pid = None
-        self._pub_step = None
-        self._pub_cmd_vel = None
-        self._pub_odom = None
-        self._pub_goal = None
-        self._pub_rob_path = None
-        self._pub_human_predictions = None
         self._subscribers = []  # type: List[rp.Subscriber]
+        self._publishers = {}  # type: Dict[str, rp.Publisher]
         self.global_time = None
         self._prev_time = None
 
@@ -368,12 +363,6 @@ class MengeGym(gym.Env):
         # simulation controls
         rp.logdebug("Set up publishers and provided services")
         rp.init_node('MengeSimEnv', log_level=rp.DEBUG)
-        self._pub_step = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True, latch=True)
-        self._pub_cmd_vel = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
-        self._pub_odom = rp.Publisher('odom', Odometry, queue_size=1)
-        self._pub_goal = rp.Publisher('goal', Marker, queue_size=1)
-        self._pub_rob_path = rp.Publisher('rob_path', Path, queue_size=1)
-        self._pub_human_predictions = rp.Publisher("human_pred", MarkerArray, queue_size=1, tcp_nodelay=True)
 
     def _crowd_expansion_callback(self, msg: MarkerArray):
         rp.logdebug('Crowd Expansion subscriber callback called')
@@ -446,11 +435,11 @@ class MengeGym(gym.Env):
         cmd_vel_msg = Twist()
         cmd_vel_msg.linear.x = velocity_action
         cmd_vel_msg.angular.z = angle_action
-        self._pub_cmd_vel.publish(cmd_vel_msg)
+        self._publishers["cmd_vel"].publish(cmd_vel_msg)
         self.cmd_vel_msg = cmd_vel_msg
         # publish message twice (second time without change of angle) to avoid oscillation
         cmd_vel_msg.angular.z = 0
-        self._pub_cmd_vel.publish(cmd_vel_msg)
+        self._publishers["cmd_vel"].publish(cmd_vel_msg)
         self._angle_window(angle_action)
 
     def step(self, action: np.ndarray):
@@ -529,7 +518,7 @@ class MengeGym(gym.Env):
                 rp.logdebug('Simulation not done yet')
                 
                 rp.logdebug("Publishing {} steps".format(n_steps))
-                self._pub_step.publish(UInt8(data=n_steps))
+                self._publishers["step"].publish(UInt8(data=n_steps))
 
             rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
             rp.logdebug('#Crowd %s, #Rob %s' %
@@ -696,6 +685,11 @@ class MengeGym(gym.Env):
             sub.unregister()
         self._subscribers = []
 
+        # unregister existing publishers
+        for pub in self._publishers.values():
+            pub.unregister()
+        self._publishers = {}
+
         if self._sim_pid is not None:
             rp.loginfo("Env reset - Shutting down simulation process")
             self.roshandle.terminateOne(self._sim_pid)
@@ -706,6 +700,14 @@ class MengeGym(gym.Env):
                     't': self.config.time_step}
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(rp.Duration.from_sec(5))
+
+        rp.logdebug("Set up publishers")
+        self._publishers["step"] = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True, latch=True)
+        self._publishers["cmd_vel"] = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
+        self._publishers["odom"] = rp.Publisher('odom', Odometry, queue_size=1)
+        self._publishers["goal"] = rp.Publisher('goal', Marker, queue_size=1)
+        self._publishers["rob_path"] = rp.Publisher('rob_path', Path, queue_size=1)
+        self._publishers["human_predictions"] = rp.Publisher("human_pred", MarkerArray, queue_size=1, tcp_nodelay=True)
 
         rp.logdebug("Set up subscribers")
         self._subscribers.append(
@@ -767,7 +769,7 @@ class MengeGym(gym.Env):
             path_msg.poses = self._robot_pose_list
             path_msg.header.frame_id = "map"
             path_msg.header.stamp = current_time
-            self._pub_rob_path.publish(path_msg)
+            self._publishers["rob_path"].publish(path_msg)
 
             odom = Odometry()
             odom.header.frame_id = "odom"
@@ -782,13 +784,13 @@ class MengeGym(gym.Env):
             else:
                 odom.pose.pose = self._robot_pose_list[-1].pose
             odom.twist.twist = self.cmd_vel_msg
-            self._pub_odom.publish(odom)
+            self._publishers["odom"].publish(odom)
 
             self.goal_msg.header.stamp = current_time
-            self._pub_goal.publish(self.goal_msg)
+            self._publishers["goal"].publish(self.goal_msg)
 
             if human_traj_prediction_msg is not None:
-                self._pub_human_predictions.publish(human_traj_prediction_msg)
+                self._publishers["human_predictions"].publish(human_traj_prediction_msg)
         else:
             raise NotImplementedError("Only modes 'human' and 'ros' are supported")
 
