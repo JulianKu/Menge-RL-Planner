@@ -10,6 +10,7 @@ from crowd_nav.policy.graph_model import RGL
 from crowd_nav.policy.value_estimator import ValueEstimator
 from menge_gym.envs.utils.state import tensor_to_joint_state
 from menge_gym.envs.utils.motion_model import ModifiedAckermannModel
+from menge_gym.envs.utils.utils import DeviationWindow
 
 
 class ModelPredictiveRL(Policy):
@@ -20,6 +21,7 @@ class ModelPredictiveRL(Policy):
         self.multiagent_training = True
         self.kinematics = None
         self.motion_model = None  # type: Union[ModifiedAckermannModel, None]
+        self.oscillation_window = None  # type: Union[DeviationWindow, None]
         self.epsilon = None
         self.gamma = None
         self.speed_sampling = None
@@ -158,6 +160,7 @@ class ModelPredictiveRL(Policy):
             self.reward = env_config.reward
         else:
             self.reward = config.reward
+        self.oscillation_window = DeviationWindow(self.reward.oscillation_window_size)
 
     def set_device(self, device):
         self.device = device
@@ -251,17 +254,20 @@ class ModelPredictiveRL(Policy):
 
             if self.do_action_clip:
                 state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
-                action_indices_clipped = self.action_clip(state_tensor, self.action_indices, self.action_array,
-                                                          self.planning_width)
+                action_indices_clipped = self.action_clip(state_tensor, self.oscillation_window, self.action_indices,
+                                                          self.action_array, self.planning_width)
             else:
                 action_indices_clipped = self.action_indices
 
             for action_idx in action_indices_clipped:
                 action = self.action_array[tuple(action_idx)]
+                updated_osc_win = self.oscillation_window.copy()
+                updated_osc_win(action[1])
                 state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
                 next_state = self.state_predictor(state_tensor, action)
-                max_next_return, max_next_traj = self.V_planning(next_state, self.planning_depth, self.planning_width)
-                reward_est = self.estimate_reward(state, action)
+                reward_est = self.estimate_reward(state, action, updated_osc_win)
+                max_next_return, max_next_traj = self.V_planning(next_state, updated_osc_win, self.planning_depth,
+                                                                 self.planning_width)
                 value = reward_est + self.get_normalized_gamma() * max_next_return
                 if value > max_value:
                     max_value = value
@@ -275,17 +281,20 @@ class ModelPredictiveRL(Policy):
         else:
             self.traj = max_traj
 
-        # TODO: check that max_action is np.array([idx_velocity, idx_angle]) for action_space
+        self.oscillation_window(self.action_array[tuple(max_action) + (1,)])
+
         return max_action
 
-    def action_clip(self, state, action_indices, action_array, width, depth=1):
+    def action_clip(self, state, oscillation_window, action_indices, action_array, width, depth=1):
         values = []
 
         for action_idx in action_indices:
             action = action_array[tuple(action_idx)]
+            updated_osc_win = oscillation_window.copy()
+            updated_osc_win(action[1])
             next_state_est = self.state_predictor(state, action)
-            next_return, _ = self.V_planning(next_state_est, depth, width)
-            reward_est = self.estimate_reward(state, action)
+            reward_est = self.estimate_reward(state, action, updated_osc_win)
+            next_return, _ = self.V_planning(next_state_est, updated_osc_win, depth, width)
             value = reward_est + self.get_normalized_gamma() * next_return
             values.append(value)
 
@@ -309,7 +318,7 @@ class ModelPredictiveRL(Policy):
         # print(clipped_action_space)
         return clipped_action_indices
 
-    def V_planning(self, state, depth, width):
+    def V_planning(self, state, oscillation_window, depth, width):
         """ Plans n steps into future. Computes the value for the current state as well as the trajectories
         defined as a list of (state, action, reward) triples
 
@@ -320,7 +329,8 @@ class ModelPredictiveRL(Policy):
             return current_state_value, [(state, None, None)]
 
         if self.do_action_clip:
-            action_indices_clipped = self.action_clip(state, self.action_indices, self.action_array, width)
+            action_indices_clipped = self.action_clip(state, oscillation_window, self.action_indices,
+                                                      self.action_array, width)
         else:
             action_indices_clipped = self.action_indices
 
@@ -329,10 +339,14 @@ class ModelPredictiveRL(Policy):
 
         for action_idx in action_indices_clipped:
             action = self.action_array[tuple(action_idx)]
+            updated_osc_win = oscillation_window.copy()
+            updated_osc_win(action[1])
             next_state_est = self.state_predictor(state, action)
-            reward_est = self.estimate_reward(state, action)
-            next_value, next_traj = self.V_planning(next_state_est, depth - 1, self.planning_width)
-            return_value = current_state_value / depth + (depth - 1) / depth * (self.get_normalized_gamma() * next_value + reward_est)
+            reward_est = self.estimate_reward(state, action, updated_osc_win)
+            next_value, next_traj, next_window = self.V_planning(next_state_est, updated_osc_win, depth - 1,
+                                                                 self.planning_width)
+            return_value = current_state_value / depth + (depth - 1) / depth * (self.get_normalized_gamma() *
+                                                                                next_value + reward_est)
 
             returns.append(return_value)
             trajs.append([(state, action, reward_est)] + next_traj)
@@ -343,7 +357,7 @@ class ModelPredictiveRL(Policy):
 
         return max_return, max_traj
 
-    def estimate_reward(self, state, action):
+    def estimate_reward(self, state, action, oscillation_window):
         """ If the time step is small enough, it's okay to model agent as linear movement during this period
 
         """
@@ -406,6 +420,8 @@ class ModelPredictiveRL(Policy):
         else:
             d_min2obs = d_min2obs.min()
 
+        oscillation_reward = - self.reward.oscillation_scale * oscillation_window.mean_of_abs()
+
         # check if reaching the goal
         reaching_goal = norm(end_position - robot_state.goal_position) < robot_state.radius + robot_state.goal_radius
 
@@ -425,6 +441,8 @@ class ModelPredictiveRL(Policy):
             reward = (d_min2obs - self.reward.clearance_dist) * self.reward.clearance_penalty_factor * self.time_step
         else:
             reward = 0
+
+        reward += oscillation_reward
 
         return reward
 

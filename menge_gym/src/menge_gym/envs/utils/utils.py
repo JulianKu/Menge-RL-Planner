@@ -1,3 +1,6 @@
+from copy import deepcopy
+
+
 class DeviationWindow(object):
     def __init__(self, size):
         self.size = size
@@ -28,6 +31,9 @@ class DeviationWindow(object):
 
     def __iter__(self):
         return iter(self.content)
+
+    def copy(self):
+        return deepcopy(self)
 
     def mean(self):
         return 1 / self.size * sum(self.deviations)
