@@ -67,6 +67,7 @@ class MengeGym(gym.Env):
         self.robot_const_state = None
 
         # Reward variables
+        self._oscillation_window = None  # type: Union[None, DeviationWindow]
         self.config.success_reward = None
         self.config.collision_penalty_crowd = None
         self.config.discomfort_dist = None
@@ -90,7 +91,6 @@ class MengeGym(gym.Env):
         self._angles = None
         self.action_array = None
         self._action = None  # type: Union[None, np.ndarray]
-        self._angle_window = DeviationWindow(5)
         self.cmd_vel_msg = None
 
         # Schedule variables
@@ -207,6 +207,7 @@ class MengeGym(gym.Env):
         self.sample_goal(exclude_initial=True)
 
         # Reward
+        self._oscillation_window = DeviationWindow(config.reward.oscillation_window_size)
         self.config.oscillation_scale = config.reward.oscillation_scale
         self.config.success_reward = config.reward.success_reward
         self.config.collision_penalty_crowd = config.reward.collision_penalty_crowd
@@ -413,6 +414,7 @@ class MengeGym(gym.Env):
             robot_state = self.observation.robot_state
             velocity_action = self._velocities[action[0]]
             angle_action = self._angles[action[1]]
+            self._oscillation_window(angle_action)
 
             if isinstance(self.robot_motion_model, ModifiedAckermannModel):
                 # transform front wheel velocity and steering angle into center velocity and center velocity angle
@@ -439,7 +441,6 @@ class MengeGym(gym.Env):
         # publish message twice (second time without change of angle) to avoid oscillation
         cmd_vel_msg.angular.z = 0
         self._publishers["cmd_vel"].publish(cmd_vel_msg)
-        self._angle_window(angle_action)
 
     def step(self, action: np.ndarray):
         rp.logdebug("Performing step in the environment")
@@ -602,11 +603,11 @@ class MengeGym(gym.Env):
                 d_min_obstacle = obstacle_distances.min()
 
             if np.any(robot_pose):
-                d_goal = np.linalg.norm(robot_pose[:, :2] - goal[:2]) - robot_radius - goal[-1]
+                d_goal = np.linalg.norm(robot_pose[:, :2] - goal[:2]) - robot_radius - goal[2]
             else:
                 d_goal = np.inf
 
-            oscillation_reward = - self.config.oscillation_scale * self._angle_window.mean_of_abs()
+            oscillation_reward = - self.config.oscillation_scale * self._oscillation_window.mean_of_abs()
 
             # collision with crowd
             if d_min_crowd < 0:

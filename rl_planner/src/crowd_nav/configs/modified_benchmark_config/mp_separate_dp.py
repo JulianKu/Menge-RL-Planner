@@ -27,6 +27,17 @@ class PolicyConfig(BasePolicyConfig):
         self.model_predictive_rl.value_network_dims = [32, 100, 100, 1]
         self.model_predictive_rl.share_graph_model = False
 
+        self.reward = Config()
+        self.reward.oscillation_window_size = 2
+        self.reward.oscillation_scale = 0.001
+        self.reward.success_reward = 1
+        self.reward.collision_penalty_crowd = -0.25
+        self.reward.discomfort_dist = 0.2
+        self.reward.discomfort_penalty_factor = 0.5
+        self.reward.collision_penalty_obs = -0.25
+        self.reward.clearance_dist = 0.2
+        self.reward.clearance_penalty_factor = 0.5
+
 
 class TrainConfig(BaseTrainConfig):
     def __init__(self, debug=False):

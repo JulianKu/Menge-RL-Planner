@@ -20,6 +20,7 @@ class BaseEnvConfig(object):
     env.train_size = np.iinfo(np.uint32).max - 2000
 
     reward = Config()
+    reward.oscillation_window_size = 2
     reward.oscillation_scale = 0.001
     reward.success_reward = 1
     reward.collision_penalty_crowd = -0.25
