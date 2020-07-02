@@ -8,9 +8,8 @@ import rospy as rp
 import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist, Quaternion
 from visualization_msgs.msg import MarkerArray, Marker
-from nav_msgs.msg import Path, Odometry
+from nav_msgs.msg import Path
 from std_msgs.msg import UInt8, Float32
-from tf.transformations import quaternion_from_euler
 from env_config.config import Config
 from MengeMapParser import MengeMapParser
 from .utils.ros import obstacle2array, marker2array, goal2msg, ROSHandle
@@ -704,7 +703,6 @@ class MengeGym(gym.Env):
         rp.logdebug("Set up publishers")
         self._publishers["step"] = rp.Publisher('step', UInt8, queue_size=1, tcp_nodelay=True, latch=True)
         self._publishers["cmd_vel"] = rp.Publisher('cmd_vel', Twist, queue_size=1, tcp_nodelay=True, latch=True)
-        self._publishers["odom"] = rp.Publisher('odom', Odometry, queue_size=1)
         self._publishers["goal"] = rp.Publisher('goal', Marker, queue_size=1)
         self._publishers["rob_path"] = rp.Publisher('rob_path', Path, queue_size=1)
         self._publishers["human_predictions"] = rp.Publisher("human_pred", MarkerArray, queue_size=1, tcp_nodelay=True)
@@ -770,21 +768,6 @@ class MengeGym(gym.Env):
             path_msg.header.frame_id = "map"
             path_msg.header.stamp = current_time
             self._publishers["rob_path"].publish(path_msg)
-
-            odom = Odometry()
-            odom.header.frame_id = "odom"
-            odom.header.stamp = current_time
-            if isinstance(self.robot_motion_model, ModifiedAckermannModel):
-                center_orientation = self.robot_motion_model.orientation
-                center_position = self.robot_motion_model.pos_center
-                odom.pose.pose.position.x = float(center_position[0])
-                odom.pose.pose.position.y = float(center_position[1])
-                quat = quaternion_from_euler(0., 0., float(center_orientation))
-                odom.pose.pose.orientation = Quaternion(*quat)
-            else:
-                odom.pose.pose = self._robot_pose_list[-1].pose
-            odom.twist.twist = self.cmd_vel_msg
-            self._publishers["odom"].publish(odom)
 
             self.goal_msg.header.stamp = current_time
             self._publishers["goal"].publish(self.goal_msg)
