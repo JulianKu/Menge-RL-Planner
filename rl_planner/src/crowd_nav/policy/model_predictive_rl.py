@@ -48,8 +48,8 @@ class ModelPredictiveRL(Policy):
         self.planning_width = None
         self.do_action_clip = None
         self.sparse_search = None
-        self.sparse_speed_samples = 2
-        self.sparse_rotation_samples = 8
+        self.sparse_speed_samples = 3
+        self.sparse_rotation_samples = 4  # here: specifies samples per direction (left, right turn)
         self.action_group_index = []
         self.traj = None
 
@@ -58,8 +58,31 @@ class ModelPredictiveRL(Policy):
         if hasattr(env_config, "robot_v_pref"):
             self.v_pref = env_config.robot_v_pref
         self.action_space, self.action_array = action_space
-        self.action_indices = np.array(np.meshgrid(np.arange(self.action_space.nvec[0]),
-                                                   np.arange(self.action_space.nvec[1]))).T.reshape(-1, 2)
+        num_speeds, num_angles = self.action_space.nvec
+        self.action_indices = np.array(np.meshgrid(np.arange(num_speeds),
+                                                   np.arange(num_angles))).T.reshape(-1, 2)
+        action_group_index = np.empty_like(self.action_array[:, :, 0], dtype=int)
+        # zero velocity actions get individual action group index
+        action_group_index[0, :] = 0
+        num_speed_samples = self.sparse_speed_samples
+        speeds_per_group = int(np.ceil((num_speeds - 1) / (num_speed_samples - 1)))
+        num_angle_samples = self.sparse_rotation_samples
+        angles_per_group = int(np.ceil((num_angles - 1) / (2 * num_angle_samples)))
+        median_angle = int(np.median(range(num_angles)))
+        for s_sample in range(num_speed_samples - 1):
+            # zero angle actions get individual action group index
+            speed_idx = int(1 + s_sample * speeds_per_group)
+            speed_group = 1 + s_sample * (2 * num_angle_samples + 1)
+            action_group_index[speed_idx:, median_angle] = speed_group
+
+            for a_sample in range(num_angle_samples):
+                angle_idx_start = int(a_sample * angles_per_group)
+                angle_idx_end = min(int((a_sample + 1) * angles_per_group), median_angle)
+                action_group_index[speed_idx:, angle_idx_start:angle_idx_end] = speed_group + a_sample + 1
+                angle_idx_start, angle_idx_end = num_angles - angle_idx_end, num_angles - angle_idx_start
+                action_group_index[speed_idx:, angle_idx_start:angle_idx_end] = speed_group + num_angle_samples \
+                                                                                + a_sample + 1
+        self.action_group_index = action_group_index.reshape(-1)
 
         self.set_common_parameters(config, env_config)
         self.planning_depth = config.model_predictive_rl.planning_depth
