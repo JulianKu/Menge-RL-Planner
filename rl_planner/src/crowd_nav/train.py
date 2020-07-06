@@ -49,6 +49,7 @@ def main(args):
         try:
             if hasattr(explorer, "save_memory") and explorer.progress_file is not None:
                 explorer.save_memory()
+                policy.save_model(os.path.join(args.output_dir, 'saved_rl_model.pth'))
         except NameError:
             pass
         try:
@@ -68,14 +69,14 @@ def main(args):
     # configure paths
     make_new_dir = True
     if os.path.exists(args.output_dir):
-        if args.restart:
+        if args.restart or args.resume:
             # do not overwrite existing progress on restart
             make_new_dir = False
         elif args.overwrite:
             shutil.rmtree(args.output_dir)
         else:
             key = input('Output directory already exists! Overwrite the folder? (y/n)')
-            if key == 'y' and not args.resume:
+            if key == 'y':
                 shutil.rmtree(args.output_dir)
             else:
                 make_new_dir = False
@@ -101,7 +102,16 @@ def main(args):
     args.config = os.path.join(args.output_dir, 'config.py')
     log_file = os.path.join(args.output_dir, 'output.log')
     il_weight_file = os.path.join(args.output_dir, 'il_model.pth')
-    rl_weight_file = os.path.join(args.output_dir, 'rl_model.pth')
+    files = sorted(os.listdir(args.output_dir))
+    rl_weight_file = ""
+    for file in files:
+        if file in ['rl_model.pth' 'saved_rl_model.pth']:
+            rl_weight_file = os.path.join(args.output_dir, file)
+            break            
+        elif file.startswith('rl_model'):
+            rl_weight_file = os.path.join(args.output_dir, file)
+    if not rl_weight_file:
+        os.path.join(args.output_dir, 'rl_model.pth')
     progress_file = os.path.abspath(os.path.join(args.output_dir, 'progress.p'))
     spec = importlib.util.spec_from_file_location('config', args.config)
     if spec is None:
@@ -195,12 +205,13 @@ def main(args):
             logging.error('RL weights does not exist')
         policy.load_state_dict(torch.load(rl_weight_file))
         model = policy.get_model()
-        rl_weight_file = os.path.join(args.output_dir, 'resumed_rl_model.pth')
+        rl_weight_file = os.path.join(args.output_dir, 'rl_model.pth')
         logging.info('Load reinforcement learning trained weights. Resume training')
     elif os.path.exists(il_weight_file):
         policy.load_state_dict(torch.load(il_weight_file))
         model = policy.get_model()
         logging.info('Load imitation learning trained weights.')
+        saved_episodes = 0
     else:
         il_episodes = train_config.imitation_learning.il_episodes - saved_episodes
         if il_episodes < 0:
