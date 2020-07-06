@@ -49,7 +49,11 @@ def main(args):
         try:
             if hasattr(explorer, "save_memory") and explorer.progress_file is not None:
                 explorer.save_memory()
-                policy.save_model(os.path.join(args.output_dir, 'saved_rl_model.pth'))
+            policy.save_model(os.path.join(args.output_dir, 'saved_rl_model.pth'))
+            if best_val_model is not None:
+                policy.load_state_dict(best_val_model)
+                torch.save(best_val_model, os.path.join(args.output_dir, 'best_val.pth'))
+                logging.info('Save the best val model with the reward: {}'.format(best_val_reward))
         except NameError:
             pass
         try:
@@ -254,7 +258,7 @@ def main(args):
 
     # evaluate the model after imitation learning
     logging.info('Evaluate the model instantly after imitation learning on the validation cases')
-    explorer.run_k_episodes(env.case_size['val'], 'val', episode=0)
+    explorer.run_k_episodes(env.case_size['val'], 'val', episode=saved_episodes)
     explorer.log('val', 0)
 
     if args.test_after_every_eval:
@@ -262,8 +266,8 @@ def main(args):
         explorer.log('test', 0)
 
     explorer.set_saved_episodes(saved_episodes)
-    episode = 0
-    while (episode + saved_episodes) < train_episodes:
+    episode = 0 if not saved_episodes else saved_episodes
+    while episode < train_episodes:
         if args.resume:
             epsilon = epsilon_end
         else:
