@@ -20,7 +20,7 @@ class Explorer(object):
         self.gamma = gamma
         self.target_policy = target_policy
         self.statistics = None
-        self.current_episode = None
+        self.accumulated_episode = None
         self.saved_episodes = None
 
     # @profile
@@ -55,13 +55,13 @@ class Explorer(object):
             actions = []
             rewards = []
             step_no = 0
-            self.current_episode = episode if episode is not None else i
+            self.accumulated_episode = episode if episode is not None else i
             if self.saved_episodes is not None:
-                self.current_episode += self.saved_episodes
+                self.accumulated_episode += self.saved_episodes
             while not done:
                 step_no += 1
                 print("######################################")
-                print("RUNNING EPISODE {}, STEP NUMBER {}".format(self.current_episode, step_no))
+                print("RUNNING EPISODE {}, STEP NUMBER {}".format(self.accumulated_episode, step_no))
                 print("######################################")
                 action = self.robot.policy.predict(ob)
                 ob, reward, done, info = self.env.step(action)
@@ -94,7 +94,7 @@ class Explorer(object):
                     clearance_min_dist.append(info.min_dist)
 
             # save replay buffer every 50th episode
-            if (self.progress_file is not None) and (self.current_episode % 50 == 0) and self.current_episode != 0:
+            if (self.progress_file is not None) and (self.accumulated_episode % 50 == 0) and self.accumulated_episode != 0:
                 self.save_memory()
 
             if isinstance(info, ReachGoal):
@@ -141,7 +141,7 @@ class Explorer(object):
 
         avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.config.time_limit
 
-        extra_info = '' if self.current_episode is None else 'in episode {} '.format(self.current_episode)
+        extra_info = '' if self.accumulated_episode is None else 'in episode {} '.format(self.accumulated_episode)
         extra_info = extra_info + '' if epoch is None else extra_info + ' in epoch {} '.format(epoch)
         logging.info('{:<5} {}has success rate: {:.2f}, collision rate: {:.2f} (crowd: {:.2f}, obstacles: {:.2f}), '
                      'nav time: {:.2f}, total reward: {:.4f}, average return: {:.4f}'
@@ -173,7 +173,7 @@ class Explorer(object):
     def save_memory(self):
         assert self.progress_file is not None, "progress file needs to be set to save memory and current episode"
         print("Dump memory to file")
-        progress = {"memory": self.memory, "episode": self.current_episode}
+        progress = {"memory": self.memory, "episode": self.accumulated_episode}
         pickle.dump(progress, open(self.progress_file, "wb"))
 
     def update_memory(self, states, actions, rewards, imitation_learning=False):

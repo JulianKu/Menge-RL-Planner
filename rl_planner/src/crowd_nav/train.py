@@ -250,8 +250,8 @@ def main(args):
     # fill the memory pool with some RL experience
     if args.resume:
         robot.policy.set_epsilon(epsilon_end)
-        explorer.set_saved_episodes(saved_episodes)
-        explorer.run_k_episodes(100, 'train', update_memory=True, episode=0)
+        explorer.set_saved_episodes(saved_episodes - 100)
+        explorer.run_k_episodes(100, 'train', update_memory=True)
     logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
     best_val_reward = -1
     best_val_model = None
@@ -262,45 +262,48 @@ def main(args):
     explorer.log('val', 0)
 
     if args.test_after_every_eval:
-        explorer.run_k_episodes(env.case_size['test'], 'test', episode=0, print_failure=True)
+        explorer.run_k_episodes(env.case_size['test'], 'test', episode=saved_episodes, print_failure=True)
         explorer.log('test', 0)
 
     explorer.set_saved_episodes(saved_episodes)
-    episode = 0 if not saved_episodes else saved_episodes
-    while episode < train_episodes:
+    episode = 0
+    accumulated_episode = saved_episodes
+    
+    while accumulated_episode < train_episodes:
         if args.resume:
             epsilon = epsilon_end
         else:
-            if episode < epsilon_decay:
-                epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * episode
+            if accumulated_episode < epsilon_decay:
+                epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * accumulated_episode
             else:
                 epsilon = epsilon_end
         robot.policy.set_epsilon(epsilon)
 
         # sample k episodes into memory and optimize over the generated memory
         explorer.run_k_episodes(sample_episodes, 'train', update_memory=True, episode=episode)
-        explorer.log('train', episode)
+        explorer.log('train', accumulated_episode)
 
-        trainer.optimize_batch(train_batches, episode)
+        trainer.optimize_batch(train_batches, accumulated_episode)
         episode += 1
+        accumulated_episode += 1
 
-        if episode % target_update_interval == 0:
+        if accumulated_episode % target_update_interval == 0:
             trainer.update_target_model(model)
         # evaluate the model
-        if episode % evaluation_interval == 0:
+        if accumulated_episode % evaluation_interval == 0:
             _, _, _, reward, _ = explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode)
-            explorer.log('val', episode // evaluation_interval)
+            explorer.log('val', accumulated_episode // evaluation_interval)
 
-            if episode % checkpoint_interval == 0 and reward > best_val_reward:
+            if accumulated_episode % checkpoint_interval == 0 and reward > best_val_reward:
                 best_val_reward = reward
                 best_val_model = copy.deepcopy(policy.get_state_dict())
         # test after every evaluation to check how the generalization performance evolves
             if args.test_after_every_eval:
                 explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
-                explorer.log('test', episode // evaluation_interval)
+                explorer.log('test', accumulated_episode // evaluation_interval)
 
-        if episode != 0 and episode % checkpoint_interval == 0:
-            current_checkpoint = episode // checkpoint_interval - 1
+        if accumulated_episode != 0 and accumulated_episode % checkpoint_interval == 0:
+            current_checkpoint = accumulated_episode // checkpoint_interval - 1
             save_every_checkpoint_rl_weight_file = rl_weight_file.split('.')[0] + '_' + str(current_checkpoint) + '.pth'
             policy.save_model(save_every_checkpoint_rl_weight_file)
 
