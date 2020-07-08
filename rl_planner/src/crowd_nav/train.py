@@ -109,13 +109,13 @@ def main(args):
     files = sorted(os.listdir(args.output_dir))
     rl_weight_file = ""
     for file in files:
-        if file in ['rl_model.pth' 'saved_rl_model.pth']:
+        if file in ['rl_model.pth', 'saved_rl_model.pth']:
             rl_weight_file = os.path.join(args.output_dir, file)
-            break            
+            break
         elif file.startswith('rl_model'):
             rl_weight_file = os.path.join(args.output_dir, file)
     if not rl_weight_file:
-        os.path.join(args.output_dir, 'rl_model.pth')
+        rl_weight_file = os.path.join(args.output_dir, 'rl_model.pth')
     progress_file = os.path.abspath(os.path.join(args.output_dir, 'progress.p'))
     spec = importlib.util.spec_from_file_location('config', args.config)
     if spec is None:
@@ -273,7 +273,7 @@ def main(args):
     explorer.set_saved_episodes(saved_episodes)
     episode = 0
     accumulated_episode = saved_episodes
-    
+
     while accumulated_episode < train_episodes:
         if accumulated_episode < epsilon_decay:
             epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * accumulated_episode
