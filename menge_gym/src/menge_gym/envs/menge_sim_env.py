@@ -472,6 +472,8 @@ class MengeGym(gym.Env):
             self.rob_tracker.update(robot_pose)
         if isinstance(crowd_pose, np.ndarray):
             ped_trackers = self.ped_tracker.update(crowd_pose)
+        else:
+            ped_trackers = self.ped_tracker.update(np.array([], dtype=float).reshape(0, 4))
 
         rob_tracker = self.rob_tracker.get_state()
         pedestrian_state = ObservableState(ped_trackers[ped_trackers[:, -1].argsort()])
