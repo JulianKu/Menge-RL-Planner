@@ -270,13 +270,10 @@ def main(args):
     accumulated_episode = saved_episodes
     
     while accumulated_episode < train_episodes:
-        if args.resume:
-            epsilon = epsilon_end
+        if accumulated_episode < epsilon_decay:
+            epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * accumulated_episode
         else:
-            if accumulated_episode < epsilon_decay:
-                epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * accumulated_episode
-            else:
-                epsilon = epsilon_end
+            epsilon = epsilon_end
         robot.policy.set_epsilon(epsilon)
 
         # sample k episodes into memory and optimize over the generated memory
