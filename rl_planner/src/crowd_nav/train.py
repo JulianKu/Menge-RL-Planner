@@ -249,8 +249,13 @@ def main(args):
     trainer.set_learning_rate(rl_learning_rate)
     # fill the memory pool with some RL experience
     if args.resume:
-        robot.policy.set_epsilon(epsilon_end)
-        explorer.set_saved_episodes(saved_episodes - 100)
+        episode = saved_episodes - 100
+        if episode < epsilon_decay:
+            epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * episode
+        else:
+            epsilon = epsilon_end
+        robot.policy.set_epsilon(episode)
+        explorer.set_saved_episodes(episode)
         explorer.run_k_episodes(100, 'train', update_memory=True)
     logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
     best_val_reward = -1
