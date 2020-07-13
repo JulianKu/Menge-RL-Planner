@@ -39,11 +39,11 @@ def main(args):
             logging.info('Loaded IL weights')
         elif args.rl:
             if os.path.exists(os.path.join(args.model_dir, 'resumed_rl_model.pth')):
-                model_weights = os.path.join(args.model_dir, 'resumed_rl_model.pth')
+                model_file = 'resumed_rl_model.pth'
             else:
-                print(os.listdir(args.model_dir))
-                model_weights = os.path.join(args.model_dir, sorted(os.listdir(args.model_dir))[-1])
-            logging.info('Loaded RL weights')
+                model_file = sorted(filter(lambda x: x.startswith("rl_model"), os.listdir(args.model_dir)))[-1]
+            model_weights = os.path.join(args.model_dir, model_file)
+            logging.info('Loaded RL weights from {}'.format(model_file))
         else:
             model_weights = os.path.join(args.model_dir, 'best_val.pth')
             logging.info('Loaded RL weights with best VAL')
