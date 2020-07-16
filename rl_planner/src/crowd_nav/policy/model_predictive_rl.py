@@ -21,6 +21,7 @@ class ModelPredictiveRL(Policy):
         self.multiagent_training = True
         self.kinematics = None
         self.motion_model = None  # type: Union[ModifiedAckermannModel, None]
+        self.last_d_goal = None
         self.oscillation_window = None  # type: Union[DeviationWindow, None]
         self.epsilon = None
         self.gamma = None
@@ -250,6 +251,9 @@ class ModelPredictiveRL(Policy):
         checkpoint = torch.load(file, map_location=self.device if self.device is not None else "cpu")
         self.load_state_dict(checkpoint)
 
+    def set_last_d_goal(self, last_d_goal):
+        self.last_d_goal = last_d_goal
+
     def predict(self, state):
         """
         A base class for all methods that takes pairwise joint state as input to value network.
@@ -311,7 +315,9 @@ class ModelPredictiveRL(Policy):
     def action_clip(self, state, oscillation_window, action_indices, action_array, width, depth=1):
         values = []
 
+        d_goal = self.compute_d_goal(state)
         for action_idx in action_indices:
+            self.set_last_d_goal(d_goal)
             action = action_array[tuple(action_idx)]
             updated_osc_win = oscillation_window.copy()
             updated_osc_win(action[1])
@@ -360,7 +366,9 @@ class ModelPredictiveRL(Policy):
         returns = []
         trajs = []
 
+        d_goal = self.compute_d_goal(state)
         for action_idx in action_indices_clipped:
+            self.set_last_d_goal(d_goal)
             action = self.action_array[tuple(action_idx)]
             updated_osc_win = oscillation_window.copy()
             updated_osc_win(action[1])
@@ -446,6 +454,10 @@ class ModelPredictiveRL(Policy):
 
         d_goal = norm(end_position - robot_state.goal_position) - robot_state.radius[0] + robot_state.goal_radius[0]
         
+        goal_approach_reward = 0
+        if self.last_d_goal is not None:
+            goal_approach_reward = self.reward.goal_approach_factor * (self.last_d_goal - d_goal)
+        self.last_d_goal = d_goal
 
         if d_min2human < 0:
             # collision with other human
@@ -465,7 +477,7 @@ class ModelPredictiveRL(Policy):
         else:
             reward = 0
 
-        reward += oscillation_reward
+        reward += oscillation_reward + goal_approach_reward
 
         return reward
 

@@ -30,6 +30,7 @@ class PolicyConfig(BasePolicyConfig):
         self.reward = Config()
         self.reward.oscillation_window_size = 2
         self.reward.oscillation_scale = 0.001
+        self.reward.goal_approach_factor = 0.005
         self.reward.success_reward = 1
         self.reward.collision_penalty_crowd = -0.25
         self.reward.discomfort_dist = 0.2

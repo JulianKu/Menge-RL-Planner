@@ -50,6 +50,8 @@ class Explorer(object):
 
         for i in range(k):
             ob = self.env.reset(phase)
+            if hasattr(self.robot.policy, "set_last_d_goal"):
+                self.robot.policy.set_last_d_goal(None)
             if hasattr(self.robot.policy, "oscillation_window"):
                 self.robot.policy.oscillation_window.reset()
             done = False
