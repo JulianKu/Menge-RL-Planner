@@ -34,7 +34,9 @@ def main(args):
             config_file = args.config
         else:
             config_file = os.path.join(args.model_dir, 'config.py')
-        if args.il:
+        if args.model_file is not None:
+            model_weights = os.path.join(args.model_dir, args.model_file)
+        elif args.il:
             model_weights = os.path.join(args.model_dir, 'il_model.pth')
             logging.info('Loaded IL weights')
         elif args.rl:
@@ -171,6 +173,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model_dir', type=str, default=None)
     parser.add_argument('--il', default=False, action='store_true')
     parser.add_argument('--rl', default=False, action='store_true')
+    parser.add_argument('--model_file', type=str, default=None)
     parser.add_argument('--gpu', default=False, action='store_true')
     parser.add_argument('-v', '--visualize', default=False, action='store_true')
     parser.add_argument('--phase', type=str, default='test')
