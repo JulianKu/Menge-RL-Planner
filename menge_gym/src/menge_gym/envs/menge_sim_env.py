@@ -68,6 +68,7 @@ class MengeGym(gym.Env):
 
         # Reward variables
         self._oscillation_window = None  # type: Union[None, DeviationWindow]
+        self._last_d_goal = None
         self.config.success_reward = None
         self.config.collision_penalty_crowd = None
         self.config.discomfort_dist = None
@@ -209,6 +210,7 @@ class MengeGym(gym.Env):
         # Reward
         self._oscillation_window = DeviationWindow(config.reward.oscillation_window_size)
         self.config.oscillation_scale = config.reward.oscillation_scale
+        self.config.goal_approach_factor = config.reward.goal_approach_factor
         self.config.success_reward = config.reward.success_reward
         self.config.collision_penalty_crowd = config.reward.collision_penalty_crowd
         self.config.discomfort_dist = config.reward.discomfort_dist
@@ -609,6 +611,13 @@ class MengeGym(gym.Env):
             else:
                 d_goal = np.inf
 
+            # reward based on getting closer to/farther away from goal
+            goal_approach_reward = 0
+            if self._last_d_goal is not None and not d_goal == np.inf:
+                goal_approach_reward = self.config.goal_approach_factor * (self._last_d_goal - d_goal)
+            self._last_d_goal = d_goal if not d_goal == np.inf else None
+
+            # reward based on change of steering angle
             oscillation_reward = - self.config.oscillation_scale * self._oscillation_window.mean_of_abs()
 
             # collision with crowd
@@ -645,7 +654,7 @@ class MengeGym(gym.Env):
                 done = False
                 info = Nothing()
 
-            reward += oscillation_reward
+            reward += oscillation_reward + goal_approach_reward
 
             rp.logdebug('Current reward={} ({})'.format(reward, info))
             return reward, done, info
@@ -732,6 +741,9 @@ class MengeGym(gym.Env):
         # Reset pose lists
         self._robot_pose_list = []
         self._crowd_pose_list = []
+
+        self._oscillation_window.reset()
+        self._last_d_goal = None
 
         # perform idle action and return observation
         # return self.step(np.array([0, 0], dtype=np.int32))[0]

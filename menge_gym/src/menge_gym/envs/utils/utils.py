@@ -40,3 +40,8 @@ class DeviationWindow(object):
 
     def mean_of_abs(self):
         return 1 / self.size * sum((map(abs, self.deviations)))
+
+    def reset(self):
+        self.index = 0
+        self.content = self.size * [0]
+        self.deviations = self.size * [0]

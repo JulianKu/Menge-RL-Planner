@@ -22,6 +22,7 @@ class BaseEnvConfig(object):
     reward = Config()
     reward.oscillation_window_size = 2
     reward.oscillation_scale = 0.001
+    reward.goal_approach_factor = 0.005
     reward.success_reward = 1
     reward.collision_penalty_crowd = -0.25
     reward.discomfort_dist = 0.2
