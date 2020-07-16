@@ -1,6 +1,8 @@
 import abc
 import numpy as np
 import torch
+from menge_gym.envs.utils.state import JointState
+
 
 
 class Policy(object):
@@ -64,3 +66,14 @@ class Policy(object):
             return True
         else:
             return False
+
+    @staticmethod
+    def compute_d_goal(state):
+        if isinstance(state, JointState):
+            robot_state = state.robot_state
+            return np.linalg.norm(robot_state.position - robot_state.goal_position) \
+                   + robot_state.radius[0] + robot_state.goal_radius[0]
+        else:
+            assert isinstance(state[0], torch.Tensor)
+            robot_state = state[0].cpu().data.numpy().reshape(-1)
+            return np.linalg.norm(robot_state[:2] - robot_state[7:9]) + robot_state[3] + robot_state[9]
