@@ -733,6 +733,8 @@ class MengeGym(gym.Env):
         self._robot_pose_list = []
         self._crowd_pose_list = []
 
+        self._oscillation_window.reset()
+
         # perform idle action and return observation
         # return self.step(np.array([0, 0], dtype=np.int32))[0]
         return self.step(None)[0]

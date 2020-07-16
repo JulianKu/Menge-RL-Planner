@@ -50,6 +50,8 @@ class Explorer(object):
 
         for i in range(k):
             ob = self.env.reset(phase)
+            if hasattr(self.robot.policy, "oscillation_window"):
+                self.robot.policy.oscillation_window.reset()
             done = False
             states = []
             actions = []
