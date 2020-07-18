@@ -21,6 +21,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 from scipy.optimize import linear_sum_assignment
 from filterpy.kalman import KalmanFilter
 
+EPS = np.finfo(float).eps
 
 class KalmanTracker(object):
     """
@@ -28,7 +29,7 @@ class KalmanTracker(object):
     """
     count = 0
 
-    def __init__(self, coords: np.ndarray):
+    def __init__(self, coords: np.ndarray, dt: float = 1.):
         """
         Initialises a tracker using initial coordinates.
 
@@ -36,9 +37,9 @@ class KalmanTracker(object):
         """
         # define constant velocity model
         self.kf = KalmanFilter(dim_x=7, dim_z=4)
-        self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0],
-                              [0, 1, 0, 0, 0, 1, 0],
-                              [0, 0, 1, 0, 0, 0, 1],
+        self.kf.F = np.array([[1, 0, 0, 0, dt, 0, 0],
+                              [0, 1, 0, 0, 0, dt, 0],
+                              [0, 0, 1, 0, 0, 0, dt],
                               [0, 0, 0, 1, 0, 0, 0],
                               [0, 0, 0, 0, 1, 0, 0],
                               [0, 0, 0, 0, 0, 1, 0],
@@ -48,9 +49,11 @@ class KalmanTracker(object):
                               [0, 0, 1, 0, 0, 0, 0],
                               [0, 0, 0, 1, 0, 0, 0]])
 
-        self.kf.P[4:, 4:] *= 1000.  # give high uncertainty to the unobservable initial velocities
-        self.kf.P *= 10.
+        # self.kf.P[4:, 4:] *= 10.  # give high uncertainty to the unobservable initial velocities
+        # self.kf.P *= 10.
+        self.kf.Q[:4, :4] *= EPS
         self.kf.Q[4:, 4:] *= 0.01
+        self.kf.R *= EPS
 
         self.kf.x[:4] = coords.reshape((4, 1))
         self.time_since_update = 0
@@ -133,7 +136,7 @@ def associate_detections_to_trackers(detections: np.ndarray, trackers: np.ndarra
 
 
 class Sort(object):
-    def __init__(self, max_age=1, min_hits=3, d_max=None):
+    def __init__(self, max_age=1, min_hits=3, d_max=None, dt=1.):
         """
         Sets key parameters for SORT
         """
@@ -142,6 +145,7 @@ class Sort(object):
         self.d_max = d_max
         self.trackers = []
         self.frame_count = 0
+        self.dt = dt
 
     def update(self, dets: np.ndarray) -> np.ndarray:
         """
@@ -179,7 +183,7 @@ class Sort(object):
 
         # create and initialise new combined_state for unmatched detections
         for i in unmatched_dets:
-            trk = KalmanTracker(dets[i, :])
+            trk = KalmanTracker(dets[i, :], self.dt)
             self.trackers.append(trk)
         i = len(self.trackers)
         for trk in reversed(self.trackers):
