@@ -423,7 +423,7 @@ class MengeGym(gym.Env):
                 # transform front wheel velocity and steering angle into center velocity and center velocity angle
                 self.robot_motion_model.setPose(robot_state.position, robot_state.orientation[0])
                 self.robot_motion_model.computeNextPosition(np.array((velocity_action, angle_action)))
-                center_velocity_components = self.robot_motion_model.center_velocity_components
+                center_velocity_components = self.robot_motion_model.center_velocity_components.ravel()
                 velocity_action = np.linalg.norm(center_velocity_components)
                 angle_action = np.arctan2(center_velocity_components[1], center_velocity_components[0])
 
