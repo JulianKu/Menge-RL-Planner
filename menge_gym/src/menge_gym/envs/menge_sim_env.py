@@ -202,7 +202,8 @@ class MengeGym(gym.Env):
         self._set_seed()
 
         # setup pedestrian tracker
-        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*self.config.robot_v_pref*self.config.time_step)
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*self.config.robot_v_pref*self.config.time_step,
+                                dt=self.config.time_step)
 
         # sample first goal
         self.sample_goal(exclude_initial=True)
@@ -462,11 +463,11 @@ class MengeGym(gym.Env):
         # in first iteration, initialize Kalman Tracker for robot
         if self.rob_tracker is None:
             if np.any(robot_pose):
-                self.rob_tracker = KalmanTracker(robot_pose)
+                self.rob_tracker = KalmanTracker(robot_pose, dt=self.config.time_step)
             else:
                 initial_pose = np.concatenate((self.initial_robot_pos, 
                                                np.array([0, self.config.robot_radius]).reshape(1, 2)), axis=1)
-                self.rob_tracker = KalmanTracker(initial_pose)
+                self.rob_tracker = KalmanTracker(initial_pose, dt=self.config.time_step)
 
         # update velocities
         self.rob_tracker.predict()
@@ -676,7 +677,8 @@ class MengeGym(gym.Env):
         self.global_time = 0.0
         self._prev_time = 0.0
         self.rob_tracker = None
-        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step)
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step,
+                                dt=self.config.time_step)
 
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
