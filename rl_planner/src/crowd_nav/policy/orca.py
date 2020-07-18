@@ -165,16 +165,19 @@ class ORCA(Policy):
                                            maxSpeed=self.max_speed,
                                            **params)
             self.sim.addAgent(tuple(*robot_state.position),
-                              radius=robot_state.radius[0] + 0.01 + self.safety_space,
+                              radius=robot_state.radius[0] + self.safety_space,
                               maxSpeed=robot_state.v_pref[0],
                               velocity=tuple(*robot_state.velocity),
                               **params)
             for i, human_position in enumerate(human_states.position):
                 self.sim.addAgent(tuple(human_position),
-                                  radius=human_states.radius[i] + 0.01 + self.safety_space,
+                                  radius=human_states.radius[i] + self.safety_space,
                                   maxSpeed=self.max_speed,
                                   velocity=tuple(human_states.velocity[i]),
                                   **params)
+            for segment in segments:
+                if len(segment) > 1:
+                    self.sim.addObstacle(segment)
 
         else:
             self.sim.setAgentPosition(0, tuple(*robot_state.position))
@@ -189,10 +192,12 @@ class ORCA(Policy):
 
         self.sim.processObstacles()
 
-        # Set the preferred velocity to be a vector of unit magnitude (speed) in the direction of the goal.
+        # Set the preferred velocity in the direction of the goal.
         velocity = robot_state.goal_position - robot_state.position
         speed = np.linalg.norm(velocity)
-        pref_vel = velocity / speed if speed > 1 else velocity
+        v_pref = robot_state.v_pref[0]
+        # cap preferred velocity at maximum v_pref
+        pref_vel = velocity * v_pref / speed if speed > v_pref else velocity
 
         # Perturb a little to avoid deadlocks due to perfect symmetry.
         # perturb_angle = np.random.random() * 2 * np.pi
