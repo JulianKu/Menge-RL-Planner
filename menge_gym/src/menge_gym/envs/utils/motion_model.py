@@ -13,9 +13,12 @@ def plot_rects_around_center(ax, centers, angles, width, height):
     for corner, center, angle in zip(lower_left_corners, centers, angles):
         # perform rotation around center
         tr = patches.transforms.Affine2D().rotate_around(center[0], center[1], angle)
-        rect_list.append(patches.Rectangle(corner, width, height, fill=False, color='black', transform=tr + ts))
+        rect_list.append(patches.Rectangle(corner, width, height, linewidth=1, fill=False, transform=tr))
     # add to plot
-    ax.add_collection(PatchCollection(rect_list))
+    rect_col = PatchCollection(rect_list, animated=True)
+    rect_col.set_edgecolor('black')
+    rect_col.set_transform(ts)
+    ax.add_collection(rect_col)
 
 
 def rotate_around(p: Union[np.ndarray, torch.Tensor], c: Union[np.ndarray, torch.Tensor],
@@ -43,13 +46,13 @@ def rotate_around(p: Union[np.ndarray, torch.Tensor], c: Union[np.ndarray, torch
     rot_mat = ((ca, -sa), (sa, ca))
 
     if isinstance(p, torch.Tensor):
-        rotation = torch.Tensor(rot_mat).permute(2, 0, 1)
+        rotation = torch.stack((torch.stack(rot_mat[0]), torch.stack(rot_mat[1]))).permute(2, 0, 1)
         p_new = torch.einsum('ijk,ik->ij', rotation, p1) + c
+        p_new = p_new.view(pshape)
     else:
-        rotation = np.array(rot_mat).transpose((2, 0, 1))
+        rotation = np.array(rot_mat).reshape((2, 2, -1)).transpose((2, 0, 1))
         p_new = np.einsum('ijk,ik->ij', rotation, p1) + c
-
-    p_new = p_new.reshape(pshape)
+        p_new = p_new.reshape(pshape)
 
     return p_new
 
@@ -222,7 +225,7 @@ class ModifiedAckermannModel(object):
         if self.use_tensor:
             if not isinstance(orientations, torch.Tensor):
                 orientations = torch.Tensor(orientations)
-            angle_legs = torch.cat((torch.sin(orientations), torch.cos(orientations)), -1)
+            angle_legs = torch.cat((torch.cos(orientations), torch.sin(orientations)), -1)
         else:
             if isinstance(orientations, torch.Tensor):
                 orientations = orientations.data.numpy()
@@ -252,12 +255,18 @@ class ModifiedAckermannModel(object):
         """
 
         assert not np.any(
-            np.isclose(steering_angles[:, mask], 0)), "center of rotation can only be computed for actual steering angles"
+            np.isclose(steering_angles[:, mask],
+                       0)), "center of rotation can only be computed for actual steering angles"
 
         steering_angles_masked = steering_angles[:, mask]
+        # TODO: check how orientations is modified
         orientations = self.orientations
         abs_steering = np.abs(steering_angles_masked)
-        R = np.linalg.norm((self.length / np.tan(abs_steering), self.length_rear), axis=0)
+        if self.use_tensor:
+            R = torch.norm(torch.stack((self.length / np.tan(abs_steering),
+                                        torch.Tensor((self.length_rear,)).expand_as(abs_steering)), -1), dim=-1)
+        else:
+            R = np.linalg.norm((self.length / np.tan(abs_steering), self.length_rear), axis=0)
 
         dir_steering = np.sign(steering_angles_masked)
         tan_steering = np.tan(abs_steering)
@@ -266,16 +275,18 @@ class ModifiedAckermannModel(object):
                  - dir_steering * alphas
 
         angle_legs = np.stack((np.cos(thetas), np.sin(thetas)), -1)
+        new_R_dims = [1] * (2 - len(R.shape)) + list(R.shape) + [1]
         if self.use_tensor:
             angle_legs = torch.Tensor(angle_legs)
-
-        self.centers_of_rotation[:, mask] = np.tile(np.expand_dims(self.pos_center, 1),
-                                                    (1, len(steering_angles_masked), 1)) \
-                                            + angle_legs * np.expand_dims(R, axis=2)
-
+            self.centers_of_rotation[:, mask] = self.pos_center.unsqueeze(1).expand(-1,
+                                                                                    len(steering_angles_masked),
+                                                                                    -1) \
+                                                + angle_legs * R.view(new_R_dims)
+        else:
+            self.centers_of_rotation[:, mask] = np.tile(np.expand_dims(self.pos_center, 1),
+                                                        (1, len(steering_angles_masked), 1)) \
+                                                + angle_legs * R.reshape(new_R_dims)
         self.dir_steering[:, mask] = dir_steering
-        self.steering_angles_global[:, mask] = np.repeat(orientations, len(steering_angles_masked),
-                                                         axis=1) + steering_angles_masked
         self.turn_radii_center[:, mask] = R
         self.turn_radii_front[:, mask] = self.length / np.sin(abs_steering)
         self.turn_radii_rear[:, mask] = self.length / tan_steering
@@ -298,17 +309,31 @@ class ModifiedAckermannModel(object):
             else (self.velocities, self.steering_angles)
         velocities = velocities.reshape(1, -1)
         steering_angles = map_angles(steering_angles).reshape(1, -1)
-        distances = velocities * self.timestep
-        orientations = self.orientations
-        self.steering_angles = np.repeat(steering_angles, len(orientations), 0)
-        self.velocities = np.repeat(velocities, len(orientations), 0)
 
-        self.turn_radii_center = np.empty((len(orientations), velocities.shape[1]))
-        self.turn_radii_front = np.empty((len(orientations), velocities.shape[1]))
-        self.turn_radii_rear = np.empty((len(orientations), velocities.shape[1]))
-        self.centers_of_rotation = np.empty((len(orientations), velocities.shape[1], 2))
-        self.dir_steering = np.empty((len(orientations), velocities.shape[1]))
-        self.steering_angles_global = np.repeat(orientations, velocities.shape[1], axis=1)
+        if self.use_tensor:
+            orientations = self.orientations.clone()
+            velocities = torch.Tensor(velocities)
+            steering_angles = torch.Tensor(steering_angles)
+
+            self.steering_angles = steering_angles.repeat((len(orientations), velocities.shape[1]))
+            self.velocities = velocities.expand((len(orientations), velocities.shape[1]))
+
+            self.turn_radii_center = torch.empty((len(orientations), velocities.shape[1]))
+            self.turn_radii_front = torch.empty((len(orientations), velocities.shape[1]))
+            self.turn_radii_rear = torch.empty((len(orientations), velocities.shape[1]))
+            self.centers_of_rotation = torch.empty((len(orientations), velocities.shape[1], 2))
+            self.dir_steering = torch.empty((len(orientations), velocities.shape[1]))
+
+        else:
+            orientations = self.orientations
+            self.steering_angles = np.repeat(steering_angles, len(orientations), 0)
+            self.velocities = np.repeat(velocities, len(orientations), 0)
+
+            self.turn_radii_center = np.empty((len(orientations), velocities.shape[1]))
+            self.turn_radii_front = np.empty((len(orientations), velocities.shape[1]))
+            self.turn_radii_rear = np.empty((len(orientations), velocities.shape[1]))
+            self.centers_of_rotation = np.empty((len(orientations), velocities.shape[1], 2))
+            self.dir_steering = np.empty((len(orientations), velocities.shape[1]))
 
         mask = np.isclose(steering_angles, 0).reshape(-1)
 
@@ -318,35 +343,67 @@ class ModifiedAckermannModel(object):
         self.turn_radii_rear[:, mask] = np.nan
         self.centers_of_rotation[:, mask, :] = np.nan
         self.dir_steering[:, mask] = 0
+
         angle_legs = np.column_stack((np.cos(orientations), np.sin(orientations)))
+        distances = velocities * self.timestep
         if self.use_tensor:
             angle_legs = torch.Tensor(angle_legs)
-        new_pos_front_wheel = np.tile(np.expand_dims(self.pos_front_wheel, 1), (1, velocities.shape[1], 1))
-        new_pos_front_wheel[:, mask] += np.einsum('ij,k->ikj', angle_legs, distances.reshape(-1)[mask])
+            # new_pos_front_wheel = self.pos_front_wheel.clone().expand((len(orientations), velocities.shape[1], 2))
+            # new_pos_front_wheel[:, mask] = (new_pos_front_wheel[:, mask] \
+            # + torch.einsum('ij,k->ikj', angle_legs, distances.view(-1)[mask])).clone()
+
+        # else:
+        # new_pos_front_wheel = np.tile(np.expand_dims(self.pos_front_wheel, 1), (1, velocities.shape[1], 1))
+        # new_pos_front_wheel[:, mask] += np.einsum('ij,k->ikj', angle_legs, distances.reshape(-1)[mask])
 
         # Handling others by masking the opposite entries
         not_mask = np.bitwise_not(mask)
+
         self.computeCenterRotation(steering_angles, not_mask)
-        angle_driven_front_wheel = self.dir_steering[:, not_mask] * distances[:, not_mask] \
-                                   / self.turn_radii_front[:, not_mask]
-        # new_center_velocity_components = np.empty((len(orientations), velocities.shape[1], 2))
-        # new_center_velocity_components[:, mask] = angle_legs * velocities[mask]
-        # new_center_velocity_components[:, not_mask] = velocities[not_mask] * (self.turn_radius_center[:, not_mask]
-        #                                                                      / self.turn_radius_front[:, not_mask])
 
-        # determine new position
-        new_pos_front_wheel[:, not_mask] = rotate_around(new_pos_front_wheel[:, not_mask],
-                                                         self.centers_of_rotation[:, not_mask], angle_driven_front_wheel)
+        angle_driven_front_wheel = torch.zeros_like(distances) if self.use_tensor else np.zeros_like(distances)
+        angle_driven_front_wheel[:, not_mask] = self.dir_steering[:, not_mask] * distances[:, not_mask] \
+                                                / self.turn_radii_front[:, not_mask]
 
-        self.steering_angles_global[:, not_mask] += angle_driven_front_wheel
-        orientations = np.repeat(orientations, velocities.shape[1], axis=1)
-        orientations[:, not_mask] += angle_driven_front_wheel
+        # new_pos_front_wheel[:, not_mask] = rotate_around(new_pos_front_wheel[:, not_mask],
+        #                                                  self.centers_of_rotation[:, not_mask], angle_driven_front_wheel)
+
+        if self.use_tensor:
+            # determine new position
+            front_wheel_expanded = self.pos_front_wheel.expand((len(orientations), velocities.shape[1], 2))
+            new_pos_front_wheel = torch.where(
+                torch.BoolTensor(mask).unsqueeze(-1).expand_as(self.centers_of_rotation),
+                front_wheel_expanded + torch.einsum('ij,k->ikj', angle_legs, distances.view(-1)).clone(),
+                rotate_around(front_wheel_expanded, self.centers_of_rotation, angle_driven_front_wheel))
+
+            orientations = orientations.repeat((len(orientations), velocities.shape[1]))
+            self.steering_angles_global = orientations + steering_angles + angle_driven_front_wheel
+
+        else:
+            # determine new position
+            front_wheel_expanded = np.tile(np.expand_dims(self.pos_front_wheel, 1), (1, velocities.shape[1], 1))
+            new_pos_front_wheel = np.where(
+                np.broadcast_to(mask.reshape(1, -1, 1), (len(orientations), len(mask), 2)),
+                front_wheel_expanded + np.einsum('ij,k->ikj', angle_legs, distances.reshape(-1)),
+                rotate_around(front_wheel_expanded, self.centers_of_rotation, angle_driven_front_wheel))
+
+            orientations = np.repeat(orientations, velocities.shape[1], axis=1)
+            self.steering_angles_global = orientations + steering_angles + angle_driven_front_wheel
+
+        orientations += angle_driven_front_wheel
         self.orientations = orientations
 
         angle_legs = np.stack((np.cos(orientations), np.sin(orientations)), -1)
-        new_pos_center = new_pos_front_wheel - angle_legs * self.length_front
-        self.center_velocity_components = (new_pos_center - np.tile(np.expand_dims(self.pos_center, 1),
-                                                                    (1, velocities.shape[1], 1))) / self.timestep
+        if self.use_tensor:
+            angle_legs = torch.Tensor(angle_legs)
+            new_pos_center = new_pos_front_wheel - angle_legs * self.length_front
+            self.center_velocity_components = (new_pos_center - self.pos_center.expand((len(orientations),
+                                                                                        velocities.shape[1], 2))) \
+                                              / self.timestep
+        else:
+            new_pos_center = new_pos_front_wheel - angle_legs * self.length_front
+            self.center_velocity_components = (new_pos_center - np.tile(np.expand_dims(self.pos_center, 1),
+                                                                        (1, velocities.shape[1], 1))) / self.timestep
         self.pos_rear_wheel = new_pos_front_wheel - angle_legs * self.length
         self.pos_front_wheel = new_pos_front_wheel
         self.pos_center = new_pos_center
@@ -382,7 +439,8 @@ class ModifiedAckermannModel(object):
 
         # check if velocity and orientation components are collinear -> steering angle = 0
         mask_no_turning = np.isclose(np.cross(velocityComponentsCenter, orientationComponentsVehicle), 0)
-        actions[mask_no_turning] = np.column_stack((center_velocities[mask_no_turning], np.repeat(0., sum(mask_no_turning))))
+        actions[mask_no_turning] = np.column_stack(
+            (center_velocities[mask_no_turning], np.repeat(0., sum(mask_no_turning))))
 
         mask_valid_steering = abs(angle_orientation_velocity) < np.pi / 2
         mask_valid_turning = np.bitwise_and(np.bitwise_not(mask_no_turning), mask_valid_steering)
@@ -399,7 +457,7 @@ class ModifiedAckermannModel(object):
         increments_center = np.dot(orientationComponentsVehicle.reshape(-1), vec_center_rear.reshape(-1)) \
                             / np.dot(perpendicular_velocities, orientationComponentsVehicle.reshape(-1))
         vec_rear_center_of_rotation = increments_rear.reshape(-1, 1) * np.repeat(perpendicular_orientations,
-                                                                  sum(mask_valid_turning), axis=0)
+                                                                                 sum(mask_valid_turning), axis=0)
         vec_center_center_of_rotation = increments_center.reshape(-1, 1) * perpendicular_velocities
 
         centers_of_rotation = self.pos_rear_wheel + vec_rear_center_of_rotation
@@ -411,7 +469,8 @@ class ModifiedAckermannModel(object):
         # compute vector from center of rotation to front wheel
         vec_center_of_rotation_front = self.pos_front_wheel - centers_of_rotation
         # orientation of the front wheel is perpendicular to this vector
-        orientations_front_wheel = dir_steering[mask_valid_turning].reshape(-1, 1) * perpendicular2d(vec_center_of_rotation_front)
+        orientations_front_wheel = dir_steering[mask_valid_turning].reshape(-1, 1) * perpendicular2d(
+            vec_center_of_rotation_front)
 
         global_steering_angles = np.arctan2(orientations_front_wheel[:, 1], orientations_front_wheel[:, 0])
 
@@ -442,19 +501,34 @@ class ModifiedAckermannModel(object):
         return actions
 
     def reshape_attributes(self):
-        self.pos_center = self.pos_center.reshape(-1, 2)
-        self.pos_front_wheel = self.pos_front_wheel.reshape(-1, 2)
-        self.pos_rear_wheel = self.pos_rear_wheel.reshape(-1, 2)
-        self.velocities = self.velocities.reshape(-1, 1)
-        self.orientations = self.orientations.reshape(-1, 1)
-        self.steering_angles = self.steering_angles.reshape(-1, 1)
-        self.steering_angles_global = self.steering_angles_global.reshape(-1, 1)
-        self.center_velocity_components = self.center_velocity_components.reshape(-1, 2)
-        self.dir_steering = self.dir_steering.reshape(-1, 1)
-        self.turn_radii_center = self.turn_radii_center.reshape(-1, 1)
-        self.turn_radii_front = self.turn_radii_front.reshape(-1, 1)
-        self.turn_radii_rear = self.turn_radii_rear.reshape(-1, 1)
-        self.centers_of_rotation = self.centers_of_rotation.reshape(-1, 2)
+        if self.use_tensor:
+            self.pos_center = self.pos_center.view(-1, 2)
+            self.pos_front_wheel = self.pos_front_wheel.view(-1, 2)
+            self.pos_rear_wheel = self.pos_rear_wheel.view(-1, 2)
+            self.velocities = self.velocities.view(-1, 1)
+            self.orientations = self.orientations.view(-1, 1)
+            self.steering_angles = self.steering_angles.view(-1, 1)
+            self.steering_angles_global = self.steering_angles_global.view(-1, 1)
+            self.center_velocity_components = self.center_velocity_components.view(-1, 2)
+            self.dir_steering = self.dir_steering.view(-1, 1)
+            self.turn_radii_center = self.turn_radii_center.view(-1, 1)
+            self.turn_radii_front = self.turn_radii_front.view(-1, 1)
+            self.turn_radii_rear = self.turn_radii_rear.view(-1, 1)
+            self.centers_of_rotation = self.centers_of_rotation.view(-1, 2)
+        else:
+            self.pos_center = self.pos_center.reshape(-1, 2)
+            self.pos_front_wheel = self.pos_front_wheel.reshape(-1, 2)
+            self.pos_rear_wheel = self.pos_rear_wheel.reshape(-1, 2)
+            self.velocities = self.velocities.reshape(-1, 1)
+            self.orientations = self.orientations.reshape(-1, 1)
+            self.steering_angles = self.steering_angles.reshape(-1, 1)
+            self.steering_angles_global = self.steering_angles_global.reshape(-1, 1)
+            self.center_velocity_components = self.center_velocity_components.reshape(-1, 2)
+            self.dir_steering = self.dir_steering.reshape(-1, 1)
+            self.turn_radii_center = self.turn_radii_center.reshape(-1, 1)
+            self.turn_radii_front = self.turn_radii_front.reshape(-1, 1)
+            self.turn_radii_rear = self.turn_radii_rear.reshape(-1, 1)
+            self.centers_of_rotation = self.centers_of_rotation.reshape(-1, 2)
 
     def plot_vehicle(self, axes=None, show=True):
         if axes is None:
