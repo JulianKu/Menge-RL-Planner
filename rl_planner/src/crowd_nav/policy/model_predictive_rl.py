@@ -305,7 +305,7 @@ class ModelPredictiveRL(Policy):
                 max_next_return, max_next_traj = self.V_planning(next_states[i], copied_osc_win, self.planning_depth,
                                                                  self.planning_width)
                 next_returns[i] = float(max_next_return)
-                trajs[i] = [(state_tensor, action, reward_est[i])] + max_next_traj
+                trajs[i] = max_next_traj
 
             next_returns = np.array(next_returns).reshape(reward_est.shape)
             values = reward_est + self.get_normalized_gamma() * next_returns
@@ -384,7 +384,6 @@ class ModelPredictiveRL(Policy):
         next_values = []
         trajs = []
 
-        # TODO: check d_last_goal for parallelized reward estimation
         d_goal = self.compute_d_goal(state)
         actions = self.action_array[action_indices_clipped[:, 0], action_indices_clipped[:, 1]]
         next_states_est = self.state_predictor(state, actions)
