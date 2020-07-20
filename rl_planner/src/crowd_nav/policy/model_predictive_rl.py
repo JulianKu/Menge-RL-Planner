@@ -273,59 +273,78 @@ class ModelPredictiveRL(Policy):
 
         probability = np.random.random()
         if self.phase == 'train' and probability < self.epsilon:
-            max_action = self.action_space.sample()
+            max_action_idx = self.action_space.sample()
+            max_action = self.action_array[tuple(max_action_idx)]
         else:
-            max_action = None
-            max_value = float('-inf')
-            max_traj = None
+            # max_action = None
+            # max_value = float('-inf')
+            # max_traj = None
+
+            state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
 
             if self.do_action_clip:
-                state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
                 action_indices_clipped = self.action_clip(state_tensor, self.oscillation_window, self.action_indices,
                                                           self.action_array, self.planning_width)
             else:
                 action_indices_clipped = self.action_indices
 
-            for action_idx in action_indices_clipped:
-                action = self.action_array[tuple(action_idx)]
-                updated_osc_win = self.oscillation_window.copy()
-                updated_osc_win(action[1])
-                state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
-                next_state = self.state_predictor(state_tensor, action)
-                reward_est = self.estimate_reward(state, action, updated_osc_win)
-                max_next_return, max_next_traj = self.V_planning(next_state, updated_osc_win, self.planning_depth,
+            actions_clipped = self.action_array[action_indices_clipped[:, 0], action_indices_clipped[:, 1]]
+            next_states = self.state_predictor(state_tensor, actions_clipped)
+            reward_est = self.estimate_reward(state, actions_clipped, self.oscillation_window)
+
+            d_goal = self.compute_d_goal(state_tensor)
+
+            next_returns = [None] * len(actions_clipped)
+            trajs = [None] * len(actions_clipped)
+
+            for i, (action_idx, action) in enumerate(zip(action_indices_clipped, actions_clipped)):
+                self.set_last_d_goal(d_goal)
+                copied_osc_win = self.oscillation_window.copy()
+                copied_osc_win(action[1])
+                # TODO: multiprocessing here
+                max_next_return, max_next_traj = self.V_planning(next_states[i], copied_osc_win, self.planning_depth,
                                                                  self.planning_width)
-                value = reward_est + self.get_normalized_gamma() * max_next_return
-                if value > max_value:
-                    max_value = value
-                    max_action = action_idx
-                    max_traj = [(state_tensor, action, reward_est)] + max_next_traj
-            if max_action is None:
-                raise ValueError('Value network is not well trained.')
+                next_returns[i] = float(max_next_return)
+                trajs[i] = [(state_tensor, action, reward_est[i])] + max_next_traj
+
+            next_returns = np.array(next_returns).reshape(reward_est.shape)
+            values = reward_est + self.get_normalized_gamma() * next_returns
+
+            max_index = np.argmax(values)
+            max_action_idx = action_indices_clipped[max_index]
+            max_action = actions_clipped[max_index]
+            max_value = values[max_index]
+            max_traj = [(state_tensor, max_action, reward_est[max_index])] + trajs[max_index]
+            #
+            # if max_action is None:
+            #     raise ValueError('Value network is not well trained.')
 
         if self.phase == 'train':
             self.last_state = self.transform(state)
         else:
             self.traj = max_traj
 
-        self.oscillation_window(self.action_array[tuple(max_action) + (1,)])
+        self.oscillation_window(max_action[1])
 
-        return max_action
+        return max_action_idx
 
     def action_clip(self, state, oscillation_window, action_indices, action_array, width, depth=1):
-        values = []
-
+        
+        # TODO: check d_last_goal for parallelized reward estimation
         d_goal = self.compute_d_goal(state)
-        for action_idx in action_indices:
+        actions = action_array.reshape(-1, 2)
+        next_states_est = self.state_predictor(state, actions)
+        reward_est = self.estimate_reward(state, actions, oscillation_window)
+        next_returns = []
+        # TODO: try to parallelize
+        for i, action in enumerate(actions):
             self.set_last_d_goal(d_goal)
-            action = action_array[tuple(action_idx)]
-            updated_osc_win = oscillation_window.copy()
-            updated_osc_win(action[1])
-            next_state_est = self.state_predictor(state, action)
-            reward_est = self.estimate_reward(state, action, updated_osc_win)
-            next_return, _ = self.V_planning(next_state_est, updated_osc_win, depth, width)
-            value = reward_est + self.get_normalized_gamma() * next_return
-            values.append(value)
+            copied_osc_win = oscillation_window.copy()
+            copied_osc_win(action[1])
+            next_return, _ = self.V_planning(next_states_est[i], copied_osc_win, depth, width)
+            next_returns.append(next_return)
+        values = reward_est + self.get_normalized_gamma() * np.array(next_returns).reshape(reward_est.shape)
+        values = values.reshape(-1)
 
         if self.sparse_search:
             # self.sparse_speed_samples = 2
@@ -334,7 +353,6 @@ class ModelPredictiveRL(Policy):
             max_indices = np.argsort(np.array(values))[::-1]
             clipped_action_indices = []
             for index in max_indices:
-                # TODO: check if index indeed indexes action_indices right (index in range(102)
                 if self.action_group_index[index] not in added_groups:
                     clipped_action_indices.append(action_indices[index])
                     added_groups.add(self.action_group_index[index])
@@ -363,23 +381,25 @@ class ModelPredictiveRL(Policy):
         else:
             action_indices_clipped = self.action_indices
 
-        returns = []
+        next_values = []
         trajs = []
 
+        # TODO: check d_last_goal for parallelized reward estimation
         d_goal = self.compute_d_goal(state)
-        for action_idx in action_indices_clipped:
+        actions = self.action_array[action_indices_clipped[:, 0], action_indices_clipped[:, 1]]
+        next_states_est = self.state_predictor(state, actions)
+        reward_est = self.estimate_reward(state, actions, oscillation_window)
+        for i, (action_idx, action) in enumerate(zip(action_indices_clipped, actions)):
             self.set_last_d_goal(d_goal)
-            action = self.action_array[tuple(action_idx)]
             updated_osc_win = oscillation_window.copy()
             updated_osc_win(action[1])
-            next_state_est = self.state_predictor(state, action)
-            reward_est = self.estimate_reward(state, action, updated_osc_win)
-            next_value, next_traj = self.V_planning(next_state_est, updated_osc_win, depth - 1, self.planning_width)
-            return_value = current_state_value / depth + (depth - 1) / depth * (self.get_normalized_gamma() *
-                                                                                next_value + reward_est)
+            next_value, next_traj = self.V_planning(next_states_est[i], updated_osc_win, depth - 1, self.planning_width)
+            next_values.append(next_value)
+            trajs.append([(state, action, reward_est[i])] + next_traj)
 
-            returns.append(return_value)
-            trajs.append([(state, action, reward_est)] + next_traj)
+        next_values = np.array(next_values).reshape(reward_est.shape)
+        returns = current_state_value / depth + (depth - 1) / depth * (self.get_normalized_gamma() *
+                                                                       next_values + reward_est)
 
         max_index = np.argmax(returns)
         max_return = returns[max_index]
