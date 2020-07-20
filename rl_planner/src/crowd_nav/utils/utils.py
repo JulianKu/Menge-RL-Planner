@@ -53,11 +53,11 @@ def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     mask = np.bitwise_and(dot_product >= 0, dot_product <= squared_norm_ab)
 
     # distance a - x
-    dist_a = np.linalg.norm(ax, axis=1)
+    dist_a = np.linalg.norm(ax, axis=-1)
     # distance b - x
-    dist_b = np.linalg.norm(bx, axis=1)
+    dist_b = np.linalg.norm(bx, axis=-1)
     # distance closest point on line - x
-    dist_c = np.linalg.norm(closest_points - x, axis=1)
+    dist_c = np.linalg.norm(closest_points - x, axis=-1)
 
     # if closest point on line outside line segment -> shortest distance to one of the segments bounds
     d_min = np.minimum(dist_a, dist_b)
