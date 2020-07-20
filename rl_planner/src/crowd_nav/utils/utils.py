@@ -5,42 +5,46 @@ from rospy import Time, Duration
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import MarkerArray, Marker
 
-eps = np.finfo(float).eps
+EPS = np.finfo(float).eps
 
 
 def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
     """
     Calculate the shortest distance between point x and all line segments with two endpoints a[i], b[i]
 
-    @:param: a: start point(s) of the line segment(s) (shape n x d)
-    @:param: b: end point(s) of the line segment(s)   (shape n x d)
-    @:param: x: point(s) to compute distance to       (shape m x d)
+    @:param: a: start point(s) of the line segment(s) (shape ... x d)
+    @:param: b: end point(s) of the line segment(s)   (shape ... x d)
+    @:param: x: point(s) to compute distance to       (shape ... x d)
 
     :return: d_min: shortest distance(s) for all lines/points
     """
     if len(a.shape) == 1:
-        a = a.reshape(1, len(a))
+        a = a.reshape(1, -1)
     if len(b.shape) == 1:
-        b = b.reshape(1, len(b))
+        b = b.reshape(1, -1)
     if len(x.shape) == 1:
-        x = x.reshape(1, len(x))
+        x = x.reshape(1, -1)
+
 
     assert a.shape == b.shape, "Number of start and end points must be equal"
-    assert a.shape[1] == x.shape[1], "Line and Point need to have same number of coordinates " \
-                                     "(line: {}, point: {}".format(a.shape[1], x.shape[1])
-    assert x.shape[0] == 1 or a.shape[0] == 1 or x.shape[0] == a.shape[0], "You can only compare:\n" \
-                                                                           "- a single point to multiple lines\n" \
-                                                                           "- a single line to multiple points\n" \
-                                                                           "- multiple points to multiple lines " \
-                                                                           "on a 1-to-1 basis"
+    assert a.shape[-1] == x.shape[-1], "Line and Point need to have same number of coordinates " \
+                                       "(line: {}, point: {}".format(a.shape[1], x.shape[1])
+    num_segments = len(a)
+    num_points = len(x)
+
+    if num_points != 1 and num_segments != 1 and num_points != num_segments:
+        # No 1-to-1, 1-to-many, n-to-n but n-to-m comparison --> requires dim expansion
+        a = np.repeat(a[np.newaxis, ...], num_points, axis=0)
+        b = np.repeat(b[np.newaxis, ...], num_points, axis=0)
+        x = np.repeat(x[:, np.newaxis, :], num_segments, axis=1)
 
     ab = b - a
     ax = x - a
     bx = x - b
     # compute points on line through a and b that are closest to x
     # equivalent formula for single point and line: a + dot(ax, ab)/dot(ab, ab) * ab
-    # stabilized by adding eps in denominator
-    closest_points = a + ((ax * ab).sum(-1) / (ab * ab + eps).sum(-1)).reshape(-1, 1).repeat(2, axis=1) * ab
+    # stabilized by adding EPS in denominator
+    closest_points = a + ((ax * ab).sum(-1) / (ab * ab + EPS).sum(-1))[..., np.newaxis] * ab
 
     # determine whether closest_points lie on line segment
     ac = closest_points - a

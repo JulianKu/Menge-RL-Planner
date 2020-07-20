@@ -387,7 +387,7 @@ class ModelPredictiveRL(Policy):
 
         return max_return, max_traj
 
-    def estimate_reward(self, state, action, oscillation_window):
+    def estimate_reward(self, state, actions, oscillation_window):
         """ If the time step is small enough, it's okay to model agent as linear movement during this period
 
         """
@@ -400,28 +400,31 @@ class ModelPredictiveRL(Policy):
         # collision detection with other pedestrians
 
         # difference vector (distance) between robot and human (for all humans) at initial position
-        d_0 = human_states.position - robot_state.position
-
+        d_0 = np.repeat((human_states.position - robot_state.position)[:, np.newaxis, :], len(actions), axis=1)
+        actions = actions.reshape(-1, 2)
+        num_actions = len(actions)
         # compute robot velocity vector
+        action_velocities, action_angles = np.hsplit(actions, 2)
         if self.kinematics == 'holonomic':
-            new_angle = robot_state.orientation + action[1]
-            vx = action[0] * np.cos(new_angle)
-            vy = action[0] * np.sin(new_angle)
-            robot_velocity = np.array([vx, vy])
+            new_angles = robot_state.orientation + action_angles
+            vx = action_velocities * np.cos(new_angles)
+            vy = action_velocities * np.sin(new_angles)
+            robot_velocities = np.column_stack((vx, vy))
         elif self.kinematics == 'single_track':
             self.motion_model.setPose(robot_state.position, robot_state.orientation)
-            self.motion_model.computeNextPosition(action)
-            robot_velocity = self.motion_model.center_velocity_components
+            self.motion_model.computeNextPosition(actions)
+            robot_velocities = self.motion_model.center_velocity_components
         else:
             raise NotImplementedError("other motion models not implemented yet")
 
-        robot_velocity = robot_velocity.reshape(1, 2)
-
         # velocity difference between robot and human (for all humans)
-        d_velocity = human_states.velocity - robot_velocity
+        human_velocities_expanded = np.repeat(human_states.velocity[:, np.newaxis, :], len(robot_velocities), axis=1)
+        robot_velocities_expanded = np.repeat(robot_velocities[np.newaxis, :, :], len(human_states.velocity), axis=0)
+        d_velocities = human_velocities_expanded - robot_velocities_expanded
 
-        # difference vector (distance) between robot and human (for all humans) at advanced position
-        d_1 = d_0 + d_velocity * self.time_step
+        # difference vector (distance) between robot (for all actions) and human (for all humans)
+        # at advanced position
+        d_1 = d_0 + d_velocities * self.time_step
 
         # linear interpolation between d_0 and d_1 gives all differences (distances)
         # between initial and advanced position
@@ -429,57 +432,70 @@ class ModelPredictiveRL(Policy):
         origin = np.array([0, 0])
 
         # vectorized distance formula for point and line segment
-        d_min2human = point_to_segment_dist(d_0, d_1, origin) - human_states.radius - robot_state.radius
+        d_min2human = point_to_segment_dist(d_0, d_1, origin) \
+                      - human_states.radius[:, np.newaxis] \
+                      - robot_state.radius
         if d_min2human.size == 0:
-            d_min2human = np.inf
+            d_min2human = np.full(num_actions, np.inf)
         else:
-            d_min2human = d_min2human.min()
+            d_min2human = d_min2human.min(axis=0)
 
         # collision detection with obstacles
         if self.kinematics == 'holonomic':
-            end_position = robot_state.position + robot_velocity * self.time_step
+            end_position = robot_state.position + robot_velocities * self.time_step
         elif self.kinematics == 'single_track':
             end_position = self.motion_model.pos_center
         else:
             raise NotImplementedError("other motion models not implemented yet")
 
         # TODO: not only check for circle collision (via radius) but also rectangle (spanned by radius + length)
-        d_min2obs = point_to_segment_dist(robot_state.position, end_position, obstacles.position) - robot_state.radius
+        d_min2obs = point_to_segment_dist(np.repeat(robot_state.position, len(actions), axis=0),
+                                          end_position, obstacles.position) - robot_state.radius
         if d_min2obs.size == 0:
-            d_min2obs = np.inf
+            d_min2obs = np.full(num_actions, np.inf)
         else:
-            d_min2obs = d_min2obs.min()
+            d_min2obs = d_min2obs.min(0)
 
-        oscillation_reward = - self.reward.oscillation_scale * oscillation_window.mean_of_abs()
+        oscillation_deviations = 1 / oscillation_window.size * (np.abs(actions[:, 1]
+                                                                       - oscillation_window.get_last_item())
+                                                                + oscillation_window.sum_except_one())
+        oscillation_reward = - self.reward.oscillation_scale * oscillation_deviations
 
-        d_goal = norm(end_position - robot_state.goal_position) - robot_state.radius[0] + robot_state.goal_radius[0]
+        d_goal = norm(end_position - robot_state.goal_position, axis=-1) - robot_state.radius + robot_state.goal_radius
         
         goal_approach_reward = 0
         if self.last_d_goal is not None:
             goal_approach_reward = self.reward.goal_approach_factor * (self.last_d_goal - d_goal)
         self.last_d_goal = d_goal
 
-        if d_min2human < 0:
-            # collision with other human
-            reward = self.reward.collision_penalty_crowd
-        elif d_min2obs < 0:
-            # collision with obstacle
-            reward = self.reward.collision_penalty_obs
-        elif d_goal < 0:
-            # reaching_goal
-            reward = self.reward.success_reward
-        elif d_min2human < self.reward.discomfort_dist:
-            # adjust the reward based on FPS
-            reward = (d_min2human - self.reward.discomfort_dist) * self.reward.discomfort_penalty_factor \
-                     * self.time_step
-        elif d_min2obs < self.reward.clearance_dist:
-            reward = (d_min2obs - self.reward.clearance_dist) * self.reward.clearance_penalty_factor * self.time_step
-        else:
-            reward = 0
+        rewards = np.zeros(num_actions)
 
-        reward += oscillation_reward + goal_approach_reward
+        # collision with other human
+        hum_collision_mask = d_min2human < 0
+        # collision with obstacle
+        obstacles_collision_mask = (d_min2obs < 0 & ~ hum_collision_mask)
+        # reaching_goal
+        goal_mask = (d_goal < 0 & ~ (hum_collision_mask | obstacles_collision_mask))
+        # discomfortably close to humans
+        discomfort_mask = ((d_min2human < self.reward.discomfort_dist)
+                           & ~ (hum_collision_mask | obstacles_collision_mask | goal_mask))
+        # or to obstacles
+        clearance_mask = ((d_min2obs < self.reward.clearance_dist)
+                          & ~ (hum_collision_mask | obstacles_collision_mask | goal_mask | discomfort_mask))
 
-        return reward
+        rewards[hum_collision_mask] = self.reward.collision_penalty_crowd
+        rewards[obstacles_collision_mask] = self.reward.collision_penalty_obs
+        rewards[goal_mask] = self.reward.success_reward
+        # adjust the reward based on FPS
+        rewards[discomfort_mask] = (d_min2human[discomfort_mask] - self.reward.discomfort_dist) \
+                                   * self.reward.discomfort_penalty_factor * self.time_step
+        rewards[clearance_mask] = (d_min2obs[clearance_mask] - self.reward.clearance_dist) \
+                                  * self.reward.clearance_penalty_factor * self.time_step
+
+        rewards += oscillation_reward
+        rewards += goal_approach_reward
+
+        return rewards
 
     def transform(self, state) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
