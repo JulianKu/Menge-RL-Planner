@@ -1,7 +1,11 @@
 from copy import deepcopy
+import numpy as np
+
+EPS = np.finfo(float).eps
 
 
 class DeviationWindow(object):
+
     def __init__(self, size):
         self.size = size
         self.index = 0
@@ -32,14 +36,27 @@ class DeviationWindow(object):
     def __iter__(self):
         return iter(self.content)
 
+    def get_last_item(self):
+        return self.content[(self.index - 1) % self.size]
+
     def copy(self):
         return deepcopy(self)
 
-    def mean(self):
-        return 1 / self.size * sum(self.deviations)
+    def sum(self, absolute=True):
+        if absolute:
+            return sum((map(abs, self.deviations)))
+        else:
+            return sum(self.deviations)
 
-    def mean_of_abs(self):
-        return 1 / self.size * sum((map(abs, self.deviations)))
+    def sum_except_one(self, absolute=True):
+        if absolute:
+            except_one = abs(self.deviations[self.index])
+        else:
+            except_one = self.deviations[self.index]
+        return self.sum(absolute) - except_one
+
+    def mean(self, absolute=True):
+        return 1 / self.size * self.sum(absolute)
 
     def reset(self):
         self.index = 0
