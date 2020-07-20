@@ -25,7 +25,7 @@ class StatePredictor(nn.Module):
         if hasattr(self.motion_model, 'timestep'):
             self.motion_model.setTimeStep(time_step)
 
-    def forward(self, state, action, detach=False):
+    def forward(self, state, actions, detach=False):
         """ Predict the next state tensor given current state as input.
 
         :return: tensor of shape (batch_size, # of agents, feature_size)
@@ -57,42 +57,53 @@ class StatePredictor(nn.Module):
             state_embedding = state_embedding.detach()
             if human_identifiers is not None:
                 human_identifiers = human_identifiers.detach()
-        if action is None:
+        if actions is None:
             # for training purpose
-            next_robot_state = None
+            next_robot_states = None
         else:
-            next_robot_state = self.compute_next_state(state[0], action)
+            next_robot_states = self.compute_next_state(state[0], actions)
         next_human_states = self.human_motion_predictor(state_embedding)[:, 1:, :]
 
-        next_observation = (next_robot_state, (next_human_states, human_identifiers), state[2])
-        return next_observation
+        if next_robot_states is None:
+            next_observations = [(next_robot_states, (next_human_states, human_identifiers), state[2])]
+        else:
+            # create observation for each next_robots_state
+            next_observations = [(rob_state.squeeze(0), (next_human_states, human_identifiers), state[2])
+                                 for rob_state in next_robot_states.split(1, dim=0)]
+        return next_observations
 
-    def compute_next_state(self, robot_state, action):
+    def compute_next_state(self, robot_state, actions):
         # currently it can not perform parallel computation
+        # TODO: enable vectorized computation
         if robot_state.shape[0] != 1:
             raise NotImplementedError
-
+        actions = actions.reshape(-1, 2)
         # px, py, theta, radius, vx, vy, theta_dot, gx, gy, g_r, v_pref
-        next_state = robot_state.clone().squeeze()
+        next_states = robot_state.repeat(actions.shape[0], *[1] * len(robot_state.shape))
+
+        action_velocities, action_angles = np.hsplit(actions, 2)
         if self.kinematics == 'holonomic':
-            next_angle = next_state[2] + action[1]
-            vx = action[0] * np.cos(next_angle)
-            vy = action[0] * np.sin(next_angle)
-            next_state[0] += vx * self.time_step
-            next_state[1] += vy * self.time_step
-            next_state[2] = next_angle
-            next_state[4] = vx
-            next_state[5] = vy
+
+            next_angles = next_states[..., 2]
+            next_angles += action_angles.reshape(next_angles.shape)
+            vx = action_velocities.reshape(next_angles.shape) * np.cos(next_angles)
+            vy = action_velocities.reshape(next_angles.shape) * np.sin(next_angles)
+            next_states[..., 0] += vx * self.time_step
+            next_states[..., 1] += vy * self.time_step
+            next_states[..., 2] = next_angles
+            next_states[..., 4] = vx
+            next_states[..., 5] = vy
         elif self.kinematics == 'single_track':
-            self.motion_model.setPose(next_state[:2], next_state[2])
-            self.motion_model.computeNextPosition(action)
-            next_state[:2] = self.motion_model.pos_center
-            next_state[2] = self.motion_model.orientation
-            next_state[4:6] = self.motion_model.center_velocity_components
+            self.motion_model.setPose(robot_state[..., :2], robot_state[..., 2])
+            self.motion_model.computeNextPosition(actions)
+            next_states_shape = next_states.shape[:-1]
+            next_states[..., :2] = self.motion_model.pos_center.clone().view(next_states_shape + (2,))
+            next_states[..., 2] = self.motion_model.orientations.clone().view(next_states_shape)
+            next_states[..., 4:6] = self.motion_model.center_velocity_components.clone().view(next_states_shape + (2,))
         else:
             raise NotImplementedError("other motion models not implemented yet")
 
-        return next_state.unsqueeze(0).unsqueeze(0)
+        return next_states
 
 
 class LinearStatePredictor(object):
