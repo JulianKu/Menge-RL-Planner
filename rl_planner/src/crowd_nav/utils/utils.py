@@ -18,13 +18,10 @@ def point_to_segment_dist(a: np.ndarray, b: np.ndarray, x: np.ndarray):
 
     :return: d_min: shortest distance(s) for all lines/points
     """
-    if len(a.shape) == 1:
-        a = a.reshape(1, -1)
-    if len(b.shape) == 1:
-        b = b.reshape(1, -1)
-    if len(x.shape) == 1:
-        x = x.reshape(1, -1)
 
+    a = a.reshape((1, -1)) if len(a.shape) <= 1 else a
+    b = b.reshape((1, -1)) if len(b.shape) <= 1 else b
+    x = x.reshape((1, -1)) if len(x.shape) <= 1 else x
 
     assert a.shape == b.shape, "Number of start and end points must be equal"
     assert a.shape[-1] == x.shape[-1], "Line and Point need to have same number of coordinates " \
