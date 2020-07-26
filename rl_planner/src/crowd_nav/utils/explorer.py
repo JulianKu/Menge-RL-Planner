@@ -98,7 +98,7 @@ class Explorer(object):
                     clearance_min_dist.append(info.min_dist)
 
             # save replay buffer every 50th episode
-            if (self.progress_file is not None) and (self.accumulated_episode % 50 == 0) and self.accumulated_episode != 0:
+            if (self.progress_file is not None) and phase == "train" and (self.accumulated_episode % 50 == 0) and self.accumulated_episode != 0:
                 self.save_memory()
 
             if isinstance(info, ReachGoal):

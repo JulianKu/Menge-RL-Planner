@@ -99,7 +99,7 @@ class MPRLTrainer(object):
                     if update_state_predictor:
                         self.s_optimizer.zero_grad()
                         _, (next_human_states_est, next_human_identifiers_est), _ = self.state_predictor(joint_state,
-                                                                                                         None)
+                                                                                                         None)[0]
                         next_human_mask, (next_human_states, next_human_identifiers) = next_human_states
 
                         # if there is a mask, mask out padded values from predicted human state
@@ -177,7 +177,7 @@ class MPRLTrainer(object):
                 if update_state_predictor:
                     self.s_optimizer.zero_grad()
                     _, (next_human_states_est, next_human_identifiers_est), _ = self.state_predictor(joint_state, None,
-                                                                                                     detach=self.detach_state_predictor)
+                                                                                                     detach=self.detach_state_predictor)[0]
                     next_human_mask, (next_human_states, next_human_identifiers) = next_human_states
 
                     # if there is a mask, mask out padded values from predicted human state

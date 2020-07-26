@@ -19,7 +19,7 @@ from .utils.tracking import Sort, KalmanTracker
 from .utils.format import format_array
 from .utils.state import FullState, ObservableState, ObstacleState, JointState
 from .utils.motion_model import ModifiedAckermannModel
-from .utils.utils import DeviationWindow
+from .utils.utils import DeviationWindow, point_to_segment_dist
 from typing import List, Dict, Union
 
 
@@ -69,6 +69,7 @@ class MengeGym(gym.Env):
         # Reward variables
         self._oscillation_window = None  # type: Union[None, DeviationWindow]
         self._last_d_goal = None
+        self._last_robot_pos = None
         self.config.success_reward = None
         self.config.collision_penalty_crowd = None
         self.config.discomfort_dist = None
@@ -423,7 +424,7 @@ class MengeGym(gym.Env):
                 # transform front wheel velocity and steering angle into center velocity and center velocity angle
                 self.robot_motion_model.setPose(robot_state.position, robot_state.orientation[0])
                 self.robot_motion_model.computeNextPosition(np.array((velocity_action, angle_action)))
-                center_velocity_components = self.robot_motion_model.center_velocity_components
+                center_velocity_components = self.robot_motion_model.center_velocity_components.ravel()
                 velocity_action = np.linalg.norm(center_velocity_components)
                 angle_action = np.arctan2(center_velocity_components[1], center_velocity_components[0])
 
@@ -570,6 +571,7 @@ class MengeGym(gym.Env):
         else:
             # crowd_pose = [x, y, omega, r]
             crowd_pose = self._crowd_pose
+            crowd_pose = self._crowd_pose
 
             # obstacle_position = [x, y]
             obstacle_position = self._static_obstacles
@@ -577,18 +579,26 @@ class MengeGym(gym.Env):
             # robot_pose = [x, y, omega]
             robot_pose = self._robot_pose
 
+            # last robot pose for interpolation
+            last_robot_pose = self._last_robot_pos
+            if last_robot_pose is None and np.any(robot_pose):
+                last_robot_pose = robot_pose[:, :2]
+            self._last_robot_pose = robot_pose[:, :2]
+
             robot_radius = self.config.robot_radius
             goal = self.goal
 
+            # use interpolated line segment to check for collision between discrete points in time
             if np.any(crowd_pose) and np.any(robot_pose):
-                crowd_distances = np.linalg.norm(crowd_pose[:, :2] - robot_pose[:, :2], axis=1)
+                crowd_distances = point_to_segment_dist(last_robot_pose, robot_pose[:, :2], crowd_pose[:, :2])
                 crowd_distances -= crowd_pose[:, -1]
                 crowd_distances -= robot_radius
             else:
                 crowd_distances = np.array([])
 
+            # use interpolated line segment to check for collision between discrete points in time
             if np.any(obstacle_position) and np.any(robot_pose):
-                obstacle_distances = np.linalg.norm(obstacle_position - robot_pose[:, :2], axis=1)
+                obstacle_distances = point_to_segment_dist(last_robot_pose, robot_pose[:, :2], obstacle_position)
                 obstacle_distances -= robot_radius
             else:
                 obstacle_distances = np.array([])
@@ -617,9 +627,8 @@ class MengeGym(gym.Env):
             if self._last_d_goal is not None and not d_goal == np.inf:
                 goal_approach_reward = self.config.goal_approach_factor * (self._last_d_goal - d_goal)
             self._last_d_goal = d_goal if not d_goal == np.inf else None
-
             # reward based on change of steering angle
-            oscillation_reward = - self.config.oscillation_scale * self._oscillation_window.mean_of_abs()
+            oscillation_reward = - self.config.oscillation_scale * self._oscillation_window.mean()
 
             # collision with crowd
             if d_min_crowd < 0:
@@ -746,6 +755,7 @@ class MengeGym(gym.Env):
 
         self._oscillation_window.reset()
         self._last_d_goal = None
+        self._last_robot_pos = None
 
         # perform idle action and return observation
         # return self.step(np.array([0, 0], dtype=np.int32))[0]
