@@ -3,7 +3,7 @@
 import gym
 from gym import spaces
 import numpy as np
-from os import path
+from os import path, listdir
 import rospy as rp
 import xml.etree.ElementTree as ElT
 from geometry_msgs.msg import PoseArray, PoseStamped, Twist, Quaternion
@@ -43,10 +43,14 @@ class MengeGym(gym.Env):
 
         # Simulation scenario variables
         self.config.scenario_xml = None
-        self.scenario_root = None
+        self.scenario_roots = []
+        self.scene_xmls = []
         self.scene_xml = None
-        self.behavior_xml = None
+        self.robot_radii = []
+        self.human_nums = []
+        self.v_prefs = []
         self.initial_robot_pos = None
+        self.goals_arrays = []
         self.goals_array = None
 
         # Robot variables
@@ -65,6 +69,9 @@ class MengeGym(gym.Env):
         self.goal = None
         self.goal_msg = None  # type: Union[Marker, None]
         self.robot_const_state = None
+
+        # Pedestrian Models
+        self.ped_models = []
 
         # Reward variables
         self._oscillation_window = None  # type: Union[None, DeviationWindow]
@@ -112,7 +119,7 @@ class MengeGym(gym.Env):
         # Random Seed
         self.seed = None
 
-    def configure(self, config, seed=None):
+    def configure(self, config):
 
         self.config = Config()
 
@@ -120,9 +127,25 @@ class MengeGym(gym.Env):
         self.config.time_limit = config.env.time_limit
         self.config.time_step = config.env.time_step
 
+        # Pedestrian Models
+        ped_models = config.humans.model
+        if isinstance(ped_models, str):
+            self.ped_models = list([ped_models])
+        elif isinstance(ped_models, (tuple, list)):
+            self.ped_models = list(ped_models)
+
         # Simulation
-        if hasattr(config.sim, 'scenario') and path.isfile(config.sim.scenario) and config.sim.scenario.endswith(".xml"):
-            self.config.scenario_xml = config.sim.scenario
+        if hasattr(config.sim, 'scenario'):
+            if path.isfile(config.sim.scenario) and config.sim.scenario.endswith(".xml"):
+                self.config.scenario_xml = config.sim.scenario
+            elif path.isdir(config.sim.scenario):
+                scenario_files = list(filter(lambda x: x.endswith(".xml"), listdir(config.sim.scenario)))
+                if len(scenario_files) >= 1:
+                    self.config.scenario_xml = (config.sim.scenario, scenario_files)
+                else:
+                    raise ValueError("No valid scenario files provided: {}".format(config.sim.scenario))
+            else:
+                raise ValueError("No valid scenario files provided: {}".format(config.sim.scenario))
         # if no scenario provided, make new from image + parameters
         else:
             print("No scenario specified in config or invalid path.")
@@ -198,16 +221,9 @@ class MengeGym(gym.Env):
         # get more parameters from scenario xml
         self._initialize_from_scenario()
 
-        # Random Seed
-        self.seed = seed
-        self._set_seed()
-
         # setup pedestrian tracker
-        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*self.config.robot_v_pref*self.config.time_step,
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*max(self.v_prefs)*self.config.time_step,
                                 dt=self.config.time_step)
-
-        # sample first goal
-        self.sample_goal(exclude_initial=True)
 
         # Reward
         self._oscillation_window = DeviationWindow(config.reward.oscillation_window_size)
@@ -222,7 +238,7 @@ class MengeGym(gym.Env):
         self.config.clearance_penalty_factor = config.reward.clearance_dist_penalty_factor
 
         # Robot
-        v_max = self.config.robot_v_pref
+        v_max = max(self.v_prefs)
         self.config.rotation_constraint = config.robot.rotation_constraint
         self.config.num_speeds = config.robot.action_space.speed_samples
         self.config.num_angles = config.robot.action_space.rotation_samples
@@ -279,51 +295,55 @@ class MengeGym(gym.Env):
 
     def _initialize_from_scenario(self):
         scenario_xml = self.config.scenario_xml
-        scenario_dir = path.split(scenario_xml)[0]
-        self.scenario_root = parseXML(scenario_xml)
 
-        scene_xml = self.scenario_root.get('scene')
-        if not path.isabs(scene_xml):
-            self.scene_xml = path.join(scenario_dir, scene_xml)
+        if isinstance(scenario_xml, str):
+            scenario_dir, scenario_file = path.split(scenario_xml)
+            scenario_files = [scenario_file]
+        elif isinstance(scenario_xml, (tuple, list)):
+            scenario_dir, scenario_files = scenario_xml
         else:
-            self.scene_xml = scene_xml
-        assert path.isfile(self.scene_xml), 'Scene file specified in scenario_xml non-existent'
+            raise ValueError("No valid scenario specification")
 
-        scene_root = parseXML(self.scene_xml)
-        # extract robot radius from scene_xml file
-        self.config.robot_radius = float(scene_root.find("AgentProfile/Common[@external='1']").get('r'))
-        # extract number of humans from scene_xml file
-        self.config.human_num = len(scene_root.findall("AgentGroup/Generator/Agent")) - 1
-        # extract robot pref_speed from scene_xml file
-        robot_v_pref = scene_root.find("AgentProfile/Common[@external='1']").get('pref_speed')
-        if robot_v_pref is not None:
-            self.config.robot_v_pref = float(robot_v_pref)
-        else:
-            # pref_speed is inherited from other AgentProfile
-            inherited_agt_profile = scene_root.find("AgentProfile/Common[@external='1']/..").get('inherits')
-            self.config.robot_v_pref = float(scene_root.find("AgentProfile[@name='{}']/Common"
-                                                             .format(inherited_agt_profile)).get('pref_speed'))
+        for file in scenario_files:
+            scenario = path.join(scenario_dir, file)
 
-        behavior_xml = self.scenario_root.get('behavior')
-        if not path.isabs(behavior_xml):
-            self.behavior_xml = path.join(scenario_dir, behavior_xml)
-        assert path.isfile(self.behavior_xml), 'Behavior file specified in scenario_xml non-existent'
+            scenario_root = parseXML(scenario)
+            self.scenario_roots.append(scenario_root)
 
-        # extract goal set from behavior file
-        behavior_root = parseXML(self.behavior_xml)
-        goals = behavior_root.findall("GoalSet/Goal")
-        self.goals_array = np.array([goal2array(goal) for goal in goals])
+            scene_xml = scenario_root.get('scene')
+            if not path.isabs(scene_xml):
+                scene_xml = path.join(scenario_dir, scene_xml)
+            else:
+                scene_xml = scene_xml
+            assert path.isfile(scene_xml), 'Scene file specified in scenario_xml non-existent'
 
-    def _set_seed(self):
-        """set random seed in numpy, for simulation and write to scenario xml"""
+            self.scene_xmls.append(scene_xml)
+            scene_root = parseXML(scene_xml)
 
-        if self.seed is not None:
+            # extract robot radius from scene_xml file
+            self.robot_radii.append(float(scene_root.find("AgentProfile/Common[@external='1']").get('r')))
+            # extract number of humans from scene_xml file
+            self.human_nums.append(len(scene_root.findall("AgentGroup/Generator/Agent")) - 1)
+            # extract robot pref_speed from scene_xml file
+            robot_v_pref = scene_root.find("AgentProfile/Common[@external='1']").get('pref_speed')
+            if robot_v_pref is not None:
+                robot_v_pref = float(robot_v_pref)
+            else:
+                # pref_speed is inherited from other AgentProfile
+                inherited_agt_profile = scene_root.find("AgentProfile/Common[@external='1']/..").get('inherits')
+                robot_v_pref = float(scene_root.find("AgentProfile[@name='{}']/Common"
+                                                     .format(inherited_agt_profile)).get('pref_speed'))
+            self.v_prefs.append(robot_v_pref)
 
-            np.random.seed(self.seed)
+            behavior_xml = scenario_root.get('behavior')
+            if not path.isabs(behavior_xml):
+                behavior_xml = path.join(scenario_dir, behavior_xml)
+            assert path.isfile(behavior_xml), 'Behavior file specified in scenario_xml non-existent'
 
-            self.scenario_root.set("random", str(self.seed))
-            scenario_tree = ElT.ElementTree(self.scenario_root)
-            scenario_tree.write(self.config.scenario_xml, xml_declaration=True, encoding='utf-8', method="xml")
+            # extract goal set from behavior file
+            behavior_root = parseXML(behavior_xml)
+            goals = behavior_root.findall("GoalSet/Goal")
+            self.goals_arrays.append(np.array([goal2array(goal) for goal in goals]))
 
     def sample_goal(self, exclude_initial: bool = False):
         """
@@ -683,12 +703,6 @@ class MengeGym(gym.Env):
         elif phase == 'train':
             self.case_counter[phase] += 1
 
-        self.global_time = 0.0
-        self._prev_time = 0.0
-        self.rob_tracker = None
-        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step,
-                                dt=self.config.time_step)
-
         base_seed = {'train': self.case_capacity['val'] + self.case_capacity['test'],
                      'val': 0, 'test': self.case_capacity['val']}
 
@@ -716,10 +730,47 @@ class MengeGym(gym.Env):
             rp.loginfo("Env reset - Shutting down simulation process")
             self.roshandle.terminateOne(self._sim_pid)
 
+        # TODO: sample new scenario
+        if isinstance(self.config.scenario_xml, str):
+            scenario = self.config.scenario_xml
+            self.scene_xml = self.scene_xmls[0]
+            self.config.robot_radius = self.robot_radii[0]
+            self.config.human_num = self.human_nums[0]
+            self.config.robot_v_pref = self.v_prefs[0]
+            self.goals_array = self.goals_arrays[0]
+        elif isinstance(self.config.scenario_xml, (tuple, list)):
+            scenario_dir, scenario_files = self.config.scenario_xml
+            rnd_scenario_num = np.random.randint(len(scenario_files))
+            scenario = path.join(scenario_dir, scenario_files[rnd_scenario_num])
+            self.scene_xml = self.scene_xmls[rnd_scenario_num]
+            self.config.robot_radius = self.robot_radii[rnd_scenario_num]
+            self.config.human_num = self.human_nums[rnd_scenario_num]
+            self.config.robot_v_pref = self.v_prefs[rnd_scenario_num]
+            self.goals_array = self.goals_arrays[rnd_scenario_num]
+        else:
+            raise ValueError('Invalid scenario specification')
+
+        rp.loginfo("Load scenario \'{}\'".format(path.split(scenario)[1]))
+
+        self.global_time = 0.0
+        self._prev_time = 0.0
+        self.rob_tracker = None
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step,
+                                dt=self.config.time_step)
+
         rp.loginfo("Env reset - Starting new simulation process")
-        cli_args = {'p': self.config.scenario_xml,
+        cli_args = {'p': scenario,
                     'd': self.config.time_limit,
                     't': self.config.time_step}
+
+        # sample pedestrian model if available
+        if self.ped_models:
+            ped_model = str(np.random.choice(self.ped_models))
+            cli_args['m'] = ped_model
+        # set random seed if not None
+        if self.seed is not None:
+            cli_args['r'] = self.seed
+
         self._sim_pid = self.roshandle.start_rosnode('menge_sim', 'menge_sim', cli_args)
         rp.sleep(rp.Duration.from_sec(5))
 

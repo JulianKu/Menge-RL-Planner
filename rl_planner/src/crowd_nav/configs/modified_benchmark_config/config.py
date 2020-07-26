@@ -32,13 +32,13 @@ class BaseEnvConfig(object):
     reward.clearance_dist_penalty_factor = 0.1
 
     sim = Config()
-    sim.scenario = '/home/ros/test_data/small.xml'
+    sim.scenario = '/home/ros/test_data/'
     sim.human_num = 30
     sim.randomize_attributes = True
 
     humans = Config()
     humans.visible = True
-    humans.policy = 'orca'
+    humans.model = ['orca', 'pedvo', 'helbing', 'zanlungo', 'johansson', 'karamouzas']
     humans.radius = 0.3
     humans.v_pref = 1
     humans.sensor = 'coordinates'
@@ -49,7 +49,7 @@ class BaseEnvConfig(object):
     robot.radius = 0.3
     robot.length = 2  # length of robot, required for nonholonomic motion model
     robot.lf_ratio = 0.7  # center_of_mass ratio, required for nonholonomic motion model
-    robot.v_pref = 1
+    robot.v_pref = 3.
     robot.sensor_range = 50
     robot.fov = 1.7174  # field of view (FOV) in rad
     robot.sensor_resolution = 0.0017453  # in rad

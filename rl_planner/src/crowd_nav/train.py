@@ -11,6 +11,7 @@ import gym
 import copy
 import signal
 import pickle
+from numpy import median
 from tensorboardX import SummaryWriter
 from crowd_nav.utils.robot import Robot
 from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer
@@ -31,15 +32,6 @@ def iterable_to_device(iterable, device):
         if res is not None:
             new_iterable.append(res)
     return tuple(new_iterable)
-
-
-def set_random_seeds(seed):
-    """
-    Sets the random seeds for pytorch cpu and gpu
-    """
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    return None
 
 
 def main(args):
@@ -69,7 +61,6 @@ def main(args):
     # set current working directory (cwd) to this script's location
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
-    set_random_seeds(args.randomseed)
     # configure paths
     make_new_dir = True
     if os.path.exists(args.output_dir):
@@ -140,11 +131,16 @@ def main(args):
 
     new_scenario = args.scenario  # type: str
     if new_scenario is not None:
-        assert os.path.exists(new_scenario) and new_scenario.endswith(".xml"), "specified scenario is invalid"
-        env_config.sim.scenario = new_scenario
+        if os.path.isfile(new_scenario) and new_scenario.endswith(".xml"):
+            env_config.sim.scenario = new_scenario
+        elif os.path.isdir(new_scenario) \
+                and len(list(filter(lambda x: x.endswith(".xml"), os.listdir(new_scenario)))) >= 1:
+            env_config.sim.scenario = new_scenario
+        else:
+            raise ValueError("Specified scenario is invalid: {}".format(new_scenario))
 
     env = gym.make("menge_gym:MengeGym-v0")
-    env.configure(env_config, args.randomseed)
+    env.configure(env_config)
     if hasattr(env, 'roshandle'):
         env.setup_ros_connection()
 
@@ -194,7 +190,7 @@ def main(args):
     optimizer = train_config.trainer.optimizer
     if policy_config.name == 'model_predictive_rl':
         trainer = MPRLTrainer(model, policy.state_predictor, memory, device, policy, writer, batch_size, optimizer,
-                              env.config.human_num,
+                              int(median(env.human_nums)),
                               reduce_sp_update_frequency=train_config.train.reduce_sp_update_frequency,
                               freeze_state_predictor=train_config.train.freeze_state_predictor,
                               detach_state_predictor=train_config.train.detach_state_predictor,
@@ -332,7 +328,6 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', default=False, action='store_true')
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--test_after_every_eval', default=False, action='store_true')
-    parser.add_argument('--randomseed', type=int, default=17)
     parser.add_argument('--scenario', type=str, default=None)
 
     # arguments for GCN
