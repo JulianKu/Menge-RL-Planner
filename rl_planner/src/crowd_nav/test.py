@@ -5,8 +5,7 @@ import argparse
 import importlib.util
 import os
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
+import yaml
 import gym
 import subprocess
 from signal import SIGINT
@@ -30,6 +29,7 @@ def main(args):
     logging.info('Using device: %s', device)
 
     if args.model_dir is not None:
+        save_dir = args.model_dir
         if args.config is not None:
             config_file = args.config
         else:
@@ -52,6 +52,7 @@ def main(args):
 
     else:
         config_file = args.config
+        save_dir = os.path.dirname(args.config)
 
     spec = importlib.util.spec_from_file_location('config', config_file)
     if spec is None:
@@ -133,7 +134,7 @@ def main(args):
             date = datetime.now().strftime("%d_%m_%Y")
             scenario_name = os.path.splitext(os.path.split(new_scenario)[1])[0]
             rec_file = "_".join((scenario_name, args.phase, policy_name, date)) + ".bag"
-        rec_dir = args.bag_dir
+        rec_dir = save_dir = args.bag_dir
         if not os.path.isdir(rec_dir):
             os.makedirs(rec_dir)
         rec_full_path = os.path.join(rec_dir, rec_file)
@@ -150,7 +151,8 @@ def main(args):
         print("Start recording bag file")
         rosbag_proc = subprocess.Popen(record_expr)
         # TODO: CONTINUE HERE (add visualization flag to explorer and down + corresponding messages)
-        explorer.run_k_episodes(env.case_size[args.phase], args.phase, print_failure=True, visualize=True)
+        sr, crs, time, reward, avg_return = explorer.run_k_episodes(env.case_size[args.phase], args.phase,
+                                                                    print_failure=True, visualize=True)
         # finish rosbag record
         print("Stop recording bag file")
         p = psutilProcess(rosbag_proc.pid)
@@ -160,7 +162,21 @@ def main(args):
         rosbag_proc.wait()
         rosbag_proc.send_signal(SIGINT)
     else:
-        explorer.run_k_episodes(env.case_size[args.phase], args.phase, print_failure=True)
+        sr, crs, time, reward, avg_return = explorer.run_k_episodes(env.case_size[args.phase], args.phase,
+                                                                    print_failure=True)
+    stat_dict = [{"Statistics": {
+        "model": model_weights,
+        "num_test_cases": int(env.case_size[args.phase]),
+        "success_rate": float(sr),
+        "collision_rates": crs,
+        "time_limit_rate": 1. - float(sr) - crs["Total"],
+        "average_time": float(time),
+        "average_cumulative_rewards": round(float(reward), 3),
+        "average_return": round(float(avg_return), 3)
+    }}]
+    stat_file = os.path.join(save_dir, "test_stats.yaml")
+    with open(stat_file, "w") as file:
+        yaml.dump(stat_dict, file)
 
     env.close()
 
