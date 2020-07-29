@@ -28,6 +28,7 @@ class PolicyConfig(BasePolicyConfig):
         self.model_predictive_rl.share_graph_model = False
 
         self.reward = Config()
+        self.reward.vel_deviation_scale = 0.001
         self.reward.oscillation_window_size = 2
         self.reward.oscillation_scale = 0.001
         self.reward.goal_approach_factor = 0.005

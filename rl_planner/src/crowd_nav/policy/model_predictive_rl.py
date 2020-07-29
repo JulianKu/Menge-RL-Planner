@@ -475,7 +475,9 @@ class ModelPredictiveRL(Policy):
         else:
             d_min2obs = d_min2obs.min(0)
 
-        oscillation_deviations = 1 / oscillation_window.size * (np.abs(actions[:, 1]
+        pref_vel_reward = self.reward.vel_deviation_scale * np.minimum(0, action_velocities - robot_state.v_pref)
+
+        oscillation_deviations = 1 / oscillation_window.size * (np.abs(action_angles
                                                                        - oscillation_window.get_last_item())
                                                                 + oscillation_window.sum_except_one())
         oscillation_reward = - self.reward.oscillation_scale * oscillation_deviations
@@ -511,7 +513,8 @@ class ModelPredictiveRL(Policy):
         rewards[clearance_mask] = (d_min2obs[clearance_mask] - self.reward.clearance_dist) \
                                   * self.reward.clearance_penalty_factor * self.time_step
 
-        rewards += oscillation_reward
+        rewards += pref_vel_reward.reshape(rewards.shape)
+        rewards += oscillation_reward.reshape(rewards.shape)
         rewards += goal_approach_reward
 
         return rewards

@@ -226,6 +226,7 @@ class MengeGym(gym.Env):
                                 dt=self.config.time_step)
 
         # Reward
+        self.config.vel_deviation_scale = config.reward.vel_deviation_scale
         self._oscillation_window = DeviationWindow(config.reward.oscillation_window_size)
         self.config.oscillation_scale = config.reward.oscillation_scale
         self.config.goal_approach_factor = config.reward.goal_approach_factor
@@ -473,6 +474,8 @@ class MengeGym(gym.Env):
 
         reward, done, info = self._get_reward_done_info()
 
+        self._action = None
+
         if isinstance(info, InterfaceTimeout) and (self._robot_pose is None or self._crowd_pose is None):
             # in Timeout cases, crowd_poses and robot_poses might be missing
             self._crowd_pose = np.array([], dtype=float).reshape(0, 4)
@@ -566,7 +569,6 @@ class MengeGym(gym.Env):
         rp.logdebug('Simulation step(s) done')
         rp.logdebug('Current Sim Time %.3f, previous sim time %.3f' % (self.global_time, self._prev_time))
         self._prev_time = self.global_time
-        self._action = None
 
     def _get_reward_done_info(self) -> (float, bool, object):
         """
@@ -590,7 +592,6 @@ class MengeGym(gym.Env):
             return reward, done, info
         else:
             # crowd_pose = [x, y, omega, r]
-            crowd_pose = self._crowd_pose
             crowd_pose = self._crowd_pose
 
             # obstacle_position = [x, y]
@@ -642,6 +643,10 @@ class MengeGym(gym.Env):
             else:
                 d_goal = np.inf
 
+            # reward for setting speed close to preferred velocity
+            set_velocity = self._velocities[self._action[0]] if self._action is not None else 0.
+            pref_vel_reward = self.config.vel_deviation_scale * min(0, set_velocity - self.config.robot_v_pref)
+
             # reward based on getting closer to/farther away from goal
             goal_approach_reward = 0
             if self._last_d_goal is not None and not d_goal == np.inf:
@@ -684,7 +689,7 @@ class MengeGym(gym.Env):
                 done = False
                 info = Nothing()
 
-            reward += oscillation_reward + goal_approach_reward
+            reward += pref_vel_reward + oscillation_reward + goal_approach_reward
 
             rp.logdebug('Current reward={} ({})'.format(reward, info))
             return reward, done, info
