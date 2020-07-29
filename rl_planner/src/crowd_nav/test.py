@@ -65,10 +65,13 @@ def main(args):
 
     new_scenario = args.test_scenario  # type: str
     if new_scenario is not None:
-        assert os.path.exists(new_scenario) and new_scenario.endswith(".xml"), "specified scenario is invalid"
-        env_config.sim.scenario = new_scenario
-    else:
-        new_scenario = env_config.sim.scenario
+        if os.path.isfile(new_scenario) and new_scenario.endswith(".xml"):
+            env_config.sim.scenario = new_scenario
+        elif os.path.isdir(new_scenario) \
+                and len(list(filter(lambda x: x.endswith(".xml"), os.listdir(new_scenario)))) >= 1:
+            env_config.sim.scenario = new_scenario
+        else:
+            raise ValueError("Specified scenario is invalid: {}".format(new_scenario))
 
     if args.human_num is not None:
         env_config.sim.human_num = args.human_num
