@@ -38,7 +38,7 @@ class BaseEnvConfig(object):
 
     humans = Config()
     humans.visible = True
-    humans.model = ['orca', 'pedvo', 'helbing', 'zanlungo', 'johansson', 'karamouzas']
+    humans.model = 'orca'
     humans.radius = 0.3
     humans.v_pref = 1
     humans.sensor = 'coordinates'
@@ -49,14 +49,14 @@ class BaseEnvConfig(object):
     robot.radius = 0.3
     robot.length = 2  # length of robot, required for nonholonomic motion model
     robot.lf_ratio = 0.7  # center_of_mass ratio, required for nonholonomic motion model
-    robot.v_pref = 3.
+    robot.v_pref = 1.
     robot.sensor_range = 50
-    robot.fov = 1.7174  # field of view (FOV) in rad
+    robot.fov = np.pi  # field of view (FOV) in rad
     robot.sensor_resolution = 0.0017453  # in rad
-    robot.rotation_constraint = np.pi / 3
+    robot.rotation_constraint = np.pi
 
     robot.action_space = Config()
-    robot.action_space.kinematics = 'single_track'  # 'holonomic'
+    robot.action_space.kinematics = 'holonomic'
     robot.action_space.speed_samples = 5
     robot.action_space.rotation_samples = 16
     robot.action_space.speed_sampling = 'exponential'
@@ -78,7 +78,7 @@ class BasePolicyConfig(object):
     om.om_channel_size = 3
 
     action_space = Config()
-    action_space.kinematics = 'single_track'  # 'holonomic'
+    action_space.kinematics = 'holonomic'
     action_space.speed_samples = 5
     action_space.rotation_samples = 16
     action_space.speed_sampling = 'exponential'
@@ -117,10 +117,8 @@ class BasePolicyConfig(object):
     gcn.multiagent_training = True
     gcn.num_layer = 2
     gcn.X_dim = 32
-    gcn.O_dim = 32  # TODO: probably reduce target dimensions (i.e. X_dim) here, because to much from 2 (x,y) to 32
     gcn.wr_dims = [64, gcn.X_dim]
     gcn.wh_dims = [64, gcn.X_dim]
-    gcn.ws_dims = [64, gcn.O_dim]
     gcn.final_state_dim = gcn.X_dim
     gcn.gcn2_w1_dim = gcn.X_dim
     gcn.planning_dims = [150, 100, 100, 1]

@@ -642,14 +642,6 @@ class MengeGym(gym.Env):
             else:
                 d_goal = np.inf
 
-            # reward based on getting closer to/farther away from goal
-            goal_approach_reward = 0
-            if self._last_d_goal is not None and not d_goal == np.inf:
-                goal_approach_reward = self.config.goal_approach_factor * (self._last_d_goal - d_goal)
-            self._last_d_goal = d_goal if not d_goal == np.inf else None
-            # reward based on change of steering angle
-            oscillation_reward = - self.config.oscillation_scale * self._oscillation_window.mean()
-
             # collision with crowd
             if d_min_crowd < 0:
                 reward = self.config.collision_penalty_crowd
@@ -683,8 +675,6 @@ class MengeGym(gym.Env):
                 reward = 0
                 done = False
                 info = Nothing()
-
-            reward += oscillation_reward + goal_approach_reward
 
             rp.logdebug('Current reward={} ({})'.format(reward, info))
             return reward, done, info

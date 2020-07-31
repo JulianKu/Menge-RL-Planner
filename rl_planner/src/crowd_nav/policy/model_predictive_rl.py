@@ -96,24 +96,23 @@ class ModelPredictiveRL(Policy):
 
         if self.linear_state_predictor:
             self.state_predictor = LinearStatePredictor(config, self.time_step)
-            graph_model = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
+            graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
             self.value_estimator = ValueEstimator(config, graph_model)
             self.model = [graph_model, self.value_estimator.value_network]
         else:
             if self.share_graph_model:
-                graph_model = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
+                graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
                 self.value_estimator = ValueEstimator(config, graph_model)
                 self.state_predictor = StatePredictor(config, graph_model, self.time_step)
                 self.model = [graph_model, self.value_estimator.value_network,
                               self.state_predictor.human_motion_predictor]
             else:
-                graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
+                graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim)
                 self.value_estimator = ValueEstimator(config, graph_model1)
-                graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim, self.static_obs_dim)
+                graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim)
                 self.state_predictor = StatePredictor(config, graph_model2, self.time_step)
                 self.model = [graph_model1, graph_model2, self.value_estimator.value_network,
                               self.state_predictor.human_motion_predictor]
-
 
         if isinstance(self.motion_model, ModifiedAckermannModel):
             state_predictor_motion_model = self.motion_model.copy()
@@ -475,17 +474,7 @@ class ModelPredictiveRL(Policy):
         else:
             d_min2obs = d_min2obs.min(0)
 
-        oscillation_deviations = 1 / oscillation_window.size * (np.abs(actions[:, 1]
-                                                                       - oscillation_window.get_last_item())
-                                                                + oscillation_window.sum_except_one())
-        oscillation_reward = - self.reward.oscillation_scale * oscillation_deviations
-
         d_goal = norm(end_position - robot_state.goal_position, axis=-1) - robot_state.radius + robot_state.goal_radius
-        
-        goal_approach_reward = 0
-        if self.last_d_goal is not None:
-            goal_approach_reward = self.reward.goal_approach_factor * (self.last_d_goal - d_goal)
-        self.last_d_goal = d_goal
 
         rewards = np.zeros(num_actions)
 
@@ -510,9 +499,6 @@ class ModelPredictiveRL(Policy):
                                    * self.reward.discomfort_penalty_factor * self.time_step
         rewards[clearance_mask] = (d_min2obs[clearance_mask] - self.reward.clearance_dist) \
                                   * self.reward.clearance_penalty_factor * self.time_step
-
-        rewards += oscillation_reward
-        rewards += goal_approach_reward
 
         return rewards
 
