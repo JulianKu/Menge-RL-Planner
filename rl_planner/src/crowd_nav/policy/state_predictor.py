@@ -1,4 +1,5 @@
 import torch.nn as nn
+from torch import sin, cos, from_numpy
 import numpy as np
 from crowd_nav.policy.helpers import mlp
 
@@ -83,11 +84,11 @@ class StatePredictor(nn.Module):
 
         action_velocities, action_angles = np.hsplit(actions, 2)
         if self.kinematics == 'holonomic':
-
             next_angles = next_states[..., 2]
             next_angles += action_angles.reshape(next_angles.shape)
-            vx = action_velocities.reshape(next_angles.shape) * np.cos(next_angles)
-            vy = action_velocities.reshape(next_angles.shape) * np.sin(next_angles)
+            torch_velocities = from_numpy(action_velocities)
+            vx = torch_velocities.view(next_angles.shape) * cos(next_angles)
+            vy = torch_velocities.view(next_angles.shape) * sin(next_angles)
             next_states[..., 0] += vx * self.time_step
             next_states[..., 1] += vy * self.time_step
             next_states[..., 2] = next_angles
