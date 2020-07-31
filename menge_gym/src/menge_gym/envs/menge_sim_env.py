@@ -531,7 +531,7 @@ class MengeGym(gym.Env):
         counter = 0
 
         self._cmd_vel_pub()
-        while self._crowd_pose is None or self._robot_pose is None:
+        while self._crowd_pose is None or self._robot_pose is None or self.global_time < target_time:
 
             # handle simulation reaching time limit
             if self.global_time + self.config.time_step > self.config.time_limit:
@@ -761,7 +761,8 @@ class MengeGym(gym.Env):
         rp.loginfo("Env reset - Starting new simulation process")
         cli_args = {'p': scenario,
                     'd': self.config.time_limit,
-                    't': self.config.time_step}
+                    't': self.config.time_step,
+                    '-subSteps': 1}
 
         # sample pedestrian model if available
         if self.ped_models:
