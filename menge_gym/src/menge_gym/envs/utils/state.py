@@ -139,7 +139,13 @@ class JointState(object):
                 human_identifiers = human_identifiers.unsqueeze(0)
             obstacle_tensor = obstacle_tensor.unsqueeze(0)
 
-        if device is not None:
+        if device == torch.device('cuda:0'):
+            robot_state_tensor = robot_state_tensor.cuda()
+            human_states_tensor = human_states_tensor.cuda()
+            if human_identifiers is not None:
+                human_identifiers = human_identifiers.cuda()
+            obstacle_tensor = obstacle_tensor.cuda()
+        elif device is not None:
             robot_state_tensor = robot_state_tensor.to(device)
             human_states_tensor = human_states_tensor.to(device)
             if human_identifiers is not None:
@@ -171,14 +177,14 @@ def tensor_to_joint_state(state: Tuple[torch.Tensor,
     elif not isinstance(obstacles, torch.Tensor):
         raise NotImplementedError("static_obs must be Tensor or tuple of Tensors (mask, state)")
 
-    robot_state = robot_state.squeeze().data.numpy()
+    robot_state = robot_state.cpu().squeeze().data.numpy()
     robot_state = FullState(robot_state)
-    human_states = human_states.squeeze(0).data.numpy()
+    human_states = human_states.cpu().squeeze(0).data.numpy()
     human_states = ObservableState(human_states)
     if human_identifiers is not None:
-        human_identifiers = human_identifiers.squeeze(0).data.numpy()
+        human_identifiers = human_identifiers.cpu().squeeze(0).data.numpy()
         human_states.set_identifiers(human_identifiers)
-    obstacle_states = obstacles.squeeze(0).data.numpy()
+    obstacle_states = obstacles.cpu().squeeze(0).data.numpy()
     obstacle_states = ObstacleState(obstacle_states)
 
     return JointState(robot_state, human_states, obstacle_states)
