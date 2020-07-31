@@ -33,8 +33,8 @@ class PolicyConfig(BasePolicyConfig):
         self.reward.goal_approach_factor = 0.005
         self.reward.success_reward = 1
         self.reward.collision_penalty_crowd = -0.25
-        self.reward.discomfort_dist = 1.0
-        self.reward.discomfort_penalty_factor = 0.1
+        self.reward.discomfort_dist = 0.2
+        self.reward.discomfort_penalty_factor = 0.5
         self.reward.collision_penalty_obs = -0.25
         self.reward.clearance_dist = 1.0
         self.reward.clearance_penalty_factor = 0.1

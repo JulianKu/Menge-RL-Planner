@@ -190,7 +190,7 @@ def main(args):
     optimizer = train_config.trainer.optimizer
     if policy_config.name == 'model_predictive_rl':
         trainer = MPRLTrainer(model, policy.state_predictor, memory, device, policy, writer, batch_size, optimizer,
-                              int(median(env.human_nums)),
+                              env.config.human_num,
                               reduce_sp_update_frequency=train_config.train.reduce_sp_update_frequency,
                               freeze_state_predictor=train_config.train.freeze_state_predictor,
                               detach_state_predictor=train_config.train.detach_state_predictor,

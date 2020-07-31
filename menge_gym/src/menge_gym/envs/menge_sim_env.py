@@ -19,7 +19,7 @@ from .utils.tracking import Sort, KalmanTracker
 from .utils.format import format_array
 from .utils.state import FullState, ObservableState, ObstacleState, JointState
 from .utils.motion_model import ModifiedAckermannModel
-from .utils.utils import DeviationWindow, point_to_segment_dist
+from .utils.utils import DeviationWindow, point_to_segment_dist, randomize_scenario
 from typing import List, Dict, Union
 
 
@@ -40,18 +40,13 @@ class MengeGym(gym.Env):
         self.config.randomize_attributes = None
         self.config.human_num = None
         self.config.robot_sensor_range = None
+        self.human_num = None
 
         # Simulation scenario variables
         self.config.scenario_xml = None
         self.scenario_roots = []
-        self.scene_xmls = []
         self.scene_xml = None
-        self.robot_radii = []
-        self.human_nums = []
-        self.v_prefs = []
         self.initial_robot_pos = None
-        self.goals_arrays = []
-        self.goals_array = None
 
         # Robot variables
         self.config.robot_config = None
@@ -74,8 +69,6 @@ class MengeGym(gym.Env):
         self.ped_models = []
 
         # Reward variables
-        self._oscillation_window = None  # type: Union[None, DeviationWindow]
-        self._last_d_goal = None
         self._last_robot_pos = None
         self.config.success_reward = None
         self.config.collision_penalty_crowd = None
@@ -135,6 +128,9 @@ class MengeGym(gym.Env):
             self.ped_models = list(ped_models)
 
         # Simulation
+        if hasattr(config.sim, 'human_num'):
+            self.config.human_num = config.sim.human_num
+
         if hasattr(config.sim, 'scenario'):
             if path.isfile(config.sim.scenario) and config.sim.scenario.endswith(".xml"):
                 self.config.scenario_xml = config.sim.scenario
@@ -203,8 +199,8 @@ class MengeGym(gym.Env):
                     elif param == 'sensor_resolution':
                         self.config.robot_config['increment'] = config.robot.sensor_resolution
                 kwargs = {}
-                if hasattr(config.sim, 'human_num'):
-                    kwargs['num_agents'] = config.sim.human_num
+                if self.config.human_num is not None:
+                    kwargs['num_agents'] = self.config.human_num
                 if hasattr(config.sim, 'randomize_attributes'):
                     # randomize humans' radius and preferred speed
                     kwargs['randomize_attributes'] = config.sim.randomize_attributes
@@ -222,11 +218,10 @@ class MengeGym(gym.Env):
         self._initialize_from_scenario()
 
         # setup pedestrian tracker
-        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*max(self.v_prefs)*self.config.time_step,
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2*self.config.time_step,
                                 dt=self.config.time_step)
 
         # Reward
-        self._oscillation_window = DeviationWindow(config.reward.oscillation_window_size)
         self.config.oscillation_scale = config.reward.oscillation_scale
         self.config.goal_approach_factor = config.reward.goal_approach_factor
         self.config.success_reward = config.reward.success_reward
@@ -238,7 +233,7 @@ class MengeGym(gym.Env):
         self.config.clearance_penalty_factor = config.reward.clearance_dist_penalty_factor
 
         # Robot
-        v_max = max(self.v_prefs)
+        v_max = 1.0
         self.config.rotation_constraint = config.robot.rotation_constraint
         self.config.num_speeds = config.robot.action_space.speed_samples
         self.config.num_angles = config.robot.action_space.rotation_samples
@@ -306,67 +301,8 @@ class MengeGym(gym.Env):
 
         for file in scenario_files:
             scenario = path.join(scenario_dir, file)
-
             scenario_root = parseXML(scenario)
             self.scenario_roots.append(scenario_root)
-
-            scene_xml = scenario_root.get('scene')
-            if not path.isabs(scene_xml):
-                scene_xml = path.join(scenario_dir, scene_xml)
-            else:
-                scene_xml = scene_xml
-            assert path.isfile(scene_xml), 'Scene file specified in scenario_xml non-existent'
-
-            self.scene_xmls.append(scene_xml)
-            scene_root = parseXML(scene_xml)
-
-            # extract robot radius from scene_xml file
-            self.robot_radii.append(float(scene_root.find("AgentProfile/Common[@external='1']").get('r')))
-            # extract number of humans from scene_xml file
-            self.human_nums.append(len(scene_root.findall("AgentGroup/Generator/Agent")) - 1)
-            # extract robot pref_speed from scene_xml file
-            robot_v_pref = scene_root.find("AgentProfile/Common[@external='1']").get('pref_speed')
-            if robot_v_pref is not None:
-                robot_v_pref = float(robot_v_pref)
-            else:
-                # pref_speed is inherited from other AgentProfile
-                inherited_agt_profile = scene_root.find("AgentProfile/Common[@external='1']/..").get('inherits')
-                robot_v_pref = float(scene_root.find("AgentProfile[@name='{}']/Common"
-                                                     .format(inherited_agt_profile)).get('pref_speed'))
-            self.v_prefs.append(robot_v_pref)
-
-            behavior_xml = scenario_root.get('behavior')
-            if not path.isabs(behavior_xml):
-                behavior_xml = path.join(scenario_dir, behavior_xml)
-            assert path.isfile(behavior_xml), 'Behavior file specified in scenario_xml non-existent'
-
-            # extract goal set from behavior file
-            behavior_root = parseXML(behavior_xml)
-            goals = behavior_root.findall("GoalSet/Goal")
-            self.goals_arrays.append(np.array([goal2array(goal) for goal in goals]))
-
-    def sample_goal(self, exclude_initial: bool = False):
-        """
-        sample goal from available goals and set "goal" attribute accordingly
-
-        :param exclude_initial:     bool, if True exclude a goal from sampling
-                                          if the robot's initial position lies within this goal
-        """
-        goals_array = self.goals_array
-        if exclude_initial:
-            if self.initial_robot_pos is None:
-                self.initial_robot_pos = get_robot_initial_position(self.scene_xml)
-            # if initial robot position falls within goal, exclude this goal from sampling
-            dist_rob_goals = np.linalg.norm(goals_array[:, :2] - self.initial_robot_pos, axis=1) - goals_array[:, 2] \
-                             - self.config.robot_radius
-            # mask out respective goal(s)
-            mask = dist_rob_goals > 0
-            goals_array = goals_array[mask]
-
-        self.goal = goals_array[np.random.randint(len(goals_array))]
-        self.goal_msg = goal2msg(self.goal)
-        # set constant part of the robot's state
-        self.robot_const_state = np.concatenate((self.goal, [self.config.robot_v_pref])).reshape(1, 4)
 
     def setup_ros_connection(self):
 
@@ -438,7 +374,6 @@ class MengeGym(gym.Env):
             robot_state = self.observation.robot_state
             velocity_action = self._velocities[action[0]]
             angle_action = self._angles[action[1]]
-            self._oscillation_window(angle_action)
 
             if isinstance(self.robot_motion_model, ModifiedAckermannModel):
                 # transform front wheel velocity and steering angle into center velocity and center velocity angle
@@ -720,35 +655,53 @@ class MengeGym(gym.Env):
             rp.loginfo("Env reset - Shutting down simulation process")
             self.roshandle.terminateOne(self._sim_pid)
 
-        # TODO: sample new scenario
+        rp.loginfo("Randomize scenario")
         if isinstance(self.config.scenario_xml, str):
             scenario = self.config.scenario_xml
-            self.scene_xml = self.scene_xmls[0]
-            self.config.robot_radius = self.robot_radii[0]
-            self.config.human_num = self.human_nums[0]
-            self.config.robot_v_pref = self.v_prefs[0]
-            self.goals_array = self.goals_arrays[0]
+            scenario_dir = path.split(scenario)[0]
+            rnd_scenario_num = 0
         elif isinstance(self.config.scenario_xml, (tuple, list)):
             scenario_dir, scenario_files = self.config.scenario_xml
             rnd_scenario_num = np.random.randint(len(scenario_files))
             scenario = path.join(scenario_dir, scenario_files[rnd_scenario_num])
-            self.scene_xml = self.scene_xmls[rnd_scenario_num]
-            self.config.robot_radius = self.robot_radii[rnd_scenario_num]
-            self.config.human_num = self.human_nums[rnd_scenario_num]
-            self.config.robot_v_pref = self.v_prefs[rnd_scenario_num]
-            self.goals_array = self.goals_arrays[rnd_scenario_num]
         else:
             raise ValueError('Invalid scenario specification')
 
-        rp.loginfo("Load scenario \'{}\'".format(path.split(scenario)[1]))
+        scenario_root = self.scenario_roots[rnd_scenario_num]
+
+        goal = randomize_scenario(scenario_root, scenario_dir, self.config.human_num, self.config.discomfort_dist)
+        self.goal = goal
+        self.goal_msg = goal2msg(goal)
+        scene_xml = scenario_root.get('scene')
+        if not path.isabs(scene_xml):
+            scene_xml = path.join(scenario_dir, scene_xml)
+        assert path.isfile(scene_xml), 'Scene file specified in scenario_xml non-existent'
+        self.scene_xml = scene_xml
+
+        scene_root = parseXML(scene_xml)
+
+        self.config.robot_radius = float(scene_root.find("AgentProfile/Common[@external='1']").get('r'))
+        self.human_num = len(scene_root.findall("AgentGroup/Generator/Agent")) - 1
+
+        robot_v_pref = scene_root.find("AgentProfile/Common[@external='1']").get('pref_speed')
+        if robot_v_pref is not None:
+            robot_v_pref = float(robot_v_pref)
+        else:
+            # pref_speed is inherited from other AgentProfile
+            inherited_agt_profile = scene_root.find("AgentProfile/Common[@external='1']/..").get('inherits')
+            robot_v_pref = float(scene_root.find("AgentProfile[@name='{}']/Common"
+                                                 .format(inherited_agt_profile)).get('pref_speed'))
+        self.config.robot_v_pref = robot_v_pref
+        # set constant part of the robot's state
+        self.robot_const_state = np.concatenate((goal, [robot_v_pref])).reshape(1, 4)
 
         self.global_time = 0.0
         self._prev_time = 0.0
         self.rob_tracker = None
-        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * self.config.robot_v_pref * self.config.time_step,
+        self.ped_tracker = Sort(max_age=2, min_hits=2, d_max=2 * robot_v_pref * self.config.time_step,
                                 dt=self.config.time_step)
 
-        rp.loginfo("Env reset - Starting new simulation process")
+        rp.loginfo("Starting new simulation process")
         cli_args = {'p': scenario,
                     'd': self.config.time_limit,
                     't': self.config.time_step,
@@ -787,16 +740,13 @@ class MengeGym(gym.Env):
         self._subscribers.append(
             rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
         )
-        # Sample new goal
+
         self.initial_robot_pos = None
-        self.sample_goal(exclude_initial=True)
 
         # Reset pose lists
         self._robot_pose_list = []
         self._crowd_pose_list = []
 
-        self._oscillation_window.reset()
-        self._last_d_goal = None
         self._last_robot_pos = None
 
         # perform idle action and return observation

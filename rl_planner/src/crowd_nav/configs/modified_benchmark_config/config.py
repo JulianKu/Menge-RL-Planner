@@ -25,15 +25,15 @@ class BaseEnvConfig(object):
     reward.goal_approach_factor = 0.005
     reward.success_reward = 1
     reward.collision_penalty_crowd = -0.25
-    reward.discomfort_dist = 1.0
-    reward.discomfort_penalty_factor = 0.1
+    reward.discomfort_dist = 0.2
+    reward.discomfort_penalty_factor = 0.5
     reward.collision_penalty_obs = -0.25
     reward.clearance_dist = 1.0
     reward.clearance_dist_penalty_factor = 0.1
 
     sim = Config()
     sim.scenario = '/home/ros/test_data/'
-    sim.human_num = 30
+    sim.human_num = 5
     sim.randomize_attributes = True
 
     humans = Config()

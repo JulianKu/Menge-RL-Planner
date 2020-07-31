@@ -158,7 +158,6 @@ class ORCA(Policy):
             del self.sim
             self.sim = None
         # required to turn individual obstacle points into line segments to being able to process them
-        segments = obstacles2segments(obstacles)
         if self.sim is None:
             self.sim = rvo2.PyRVOSimulator(timeStep=self.time_step,
                                            radius=self.radius,
@@ -175,9 +174,6 @@ class ORCA(Policy):
                                   maxSpeed=self.max_speed,
                                   velocity=tuple(human_states.velocity[i]),
                                   **params)
-            for segment in segments:
-                if len(segment) > 1:
-                    self.sim.addObstacle(segment)
 
         else:
             self.sim.setAgentPosition(0, tuple(*robot_state.position))
@@ -185,12 +181,6 @@ class ORCA(Policy):
             for i, human_position in enumerate(human_states.position):
                 self.sim.setAgentPosition(i + 1, tuple(human_position))
                 self.sim.setAgentVelocity(i + 1, tuple(human_states.velocity[i]))
-            self.sim.clearObstacles()
-            for segment in segments:
-                if len(segment) > 1:
-                    self.sim.addObstacle(segment)
-
-        self.sim.processObstacles()
 
         # Set the preferred velocity in the direction of the goal.
         velocity = robot_state.goal_position - robot_state.position
@@ -217,8 +207,7 @@ class ORCA(Policy):
         if self.kinematics == "holonomic":
             target_velocity_magnitude = np.linalg.norm(target_velocity)
             target_angle = np.arctan2(target_velocity[1], target_velocity[0])
-            rel_target_angle = target_angle - robot_state.orientation[0]
-            action = np.array([target_velocity_magnitude, rel_target_angle])
+            action = np.array([target_velocity_magnitude, target_angle])
 
         elif self.kinematics == "single_track":
             self.motion_model.setPose(robot_state.position, robot_state.orientation[0])
