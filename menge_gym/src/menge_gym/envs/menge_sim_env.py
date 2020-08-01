@@ -682,6 +682,7 @@ class MengeGym(gym.Env):
 
         self.config.robot_radius = float(scene_root.find("AgentProfile/Common[@external='1']").get('r'))
         self.human_num = len(scene_root.findall("AgentGroup/Generator/Agent")) - 1
+        self.initial_robot_pos = get_robot_initial_position(scene_root=scene_root)
 
         robot_v_pref = scene_root.find("AgentProfile/Common[@external='1']").get('pref_speed')
         if robot_v_pref is not None:
@@ -740,8 +741,6 @@ class MengeGym(gym.Env):
         self._subscribers.append(
             rp.Subscriber("menge_sim_time", Float32, self._sim_time_callback, queue_size=50, tcp_nodelay=True)
         )
-
-        self.initial_robot_pos = None
 
         # Reset pose lists
         self._robot_pose_list = []

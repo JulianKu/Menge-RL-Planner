@@ -56,13 +56,18 @@ def goal2array(goal: ElT.Element) -> np.ndarray:
     return np.array((center_x, center_y, radius))
 
 
-def get_robot_initial_position(scene_xml: str) -> np.ndarray:
+def get_robot_initial_position(scene_xml: str = None, scene_root=None) -> np.ndarray:
     """
 
     :param scene_xml:       str, path to scene xml file
     :return:                numpy array containing the robot's initial x, y coordinates
     """
-    root = parseXML(scene_xml)
+    if scene_root is not None:
+        root = scene_root
+    elif scene_xml is not None:
+        root = parseXML(scene_xml)
+    else:
+        raise ArgumentError("Need to specify at least one of the two arguments")
     robot_attributes = root.findall("AgentGroup/ProfileSelector[@name='robot']/../Generator/Agent")[0].attrib
     x = float(robot_attributes['p_x'])
     y = float(robot_attributes['p_y'])
