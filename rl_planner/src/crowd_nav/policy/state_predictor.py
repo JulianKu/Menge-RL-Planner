@@ -87,11 +87,11 @@ class StatePredictor(nn.Module):
             next_angles = next_states[..., 2]
             if next_angles.device == device('cuda:0'):
                 action_angles = from_numpy(action_angles).view(next_angles.shape).cuda()
+                torch_velocities = from_numpy(action_velocities).view(next_angles.shape).cuda()
             else:
                 action_angles = from_numpy(action_angles).view(next_angles.shape).to(next_angles.device)
-            
+                torch_velocities = from_numpy(action_velocities).view(next_angles.shape).to(next_angles.device)
             next_angles += action_angles
-            torch_velocities = from_numpy(action_velocities).view(next_angles.shape)
             vx = torch_velocities * cos(next_angles)
             vy = torch_velocities * sin(next_angles)
             next_states[..., 0] += vx * self.time_step
