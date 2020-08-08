@@ -85,7 +85,7 @@ class StatePredictor(nn.Module):
         action_velocities, action_angles = np.hsplit(actions, 2)
         if self.kinematics == 'holonomic':
             next_angles = next_states[..., 2]
-            next_angles +=  from_numpy(action_angle).view(next_angles.shape)
+            next_angles +=  from_numpy(action_angles).view(next_angles.shape)
             torch_velocities = from_numpy(action_velocities).view(next_angles.shape)
             vx = torch_velocities * cos(next_angles)
             vy = torch_velocities * sin(next_angles)
