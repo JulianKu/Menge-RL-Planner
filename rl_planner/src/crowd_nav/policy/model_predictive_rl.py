@@ -475,7 +475,7 @@ class ModelPredictiveRL(Policy):
         else:
             d_min2obs = d_min2obs.min(0)
 
-        pref_vel_reward = self.reward.vel_deviation_scale * np.minimum(0, action_velocities - robot_state.v_pref)
+        pref_vel_reward = - self.reward.vel_deviation_scale * np.abs(action_velocities - robot_state.v_pref)
 
         oscillation_deviations = 1 / oscillation_window.size * (np.abs(action_angles
                                                                        - oscillation_window.get_last_item())

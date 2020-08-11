@@ -645,7 +645,7 @@ class MengeGym(gym.Env):
 
             # reward for setting speed close to preferred velocity
             set_velocity = self._velocities[self._action[0]] if self._action is not None else 0.
-            pref_vel_reward = self.config.vel_deviation_scale * min(0, set_velocity - self.config.robot_v_pref)
+            pref_vel_reward = - self.config.vel_deviation_scale * abs(set_velocity - self.config.robot_v_pref)
 
             # reward based on getting closer to/farther away from goal
             goal_approach_reward = 0
