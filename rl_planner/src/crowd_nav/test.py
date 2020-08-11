@@ -28,6 +28,7 @@ def main(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() and args.gpu else "cpu")
     logging.info('Using device: %s', device)
 
+    model_weights = ""
     if args.model_dir is not None:
         save_dir = args.model_dir
         if args.config is not None:
@@ -84,6 +85,7 @@ def main(args):
     # configure policy
     policy_config = config.PolicyConfig(args.debug)
     policy_name = policy_config.name
+    model_name = " ".join((policy_name, model_weights))
     policy = policy_factory[policy_name]()
     if args.planning_depth is not None:
         policy_config.model_predictive_rl.do_action_clip = True
@@ -168,7 +170,7 @@ def main(args):
         sr, crs, time, reward, avg_return = explorer.run_k_episodes(env.case_size[args.phase], args.phase,
                                                                     print_failure=True)
     stat_dict = [{"Statistics": {
-        "model": model_weights,
+        "model": model_name,
         "num_test_cases": int(env.case_size[args.phase]),
         "success_rate": float(sr),
         "collision_rates": crs,
@@ -177,7 +179,7 @@ def main(args):
         "average_cumulative_rewards": round(float(reward), 3),
         "average_return": round(float(avg_return), 3)
     }}]
-    stat_file = os.path.join(save_dir, "test_stats.yaml")
+    stat_file = os.path.join(save_dir, args.stats_file)
     with open(stat_file, "w") as file:
         yaml.dump(stat_dict, file)
 
@@ -202,6 +204,7 @@ if __name__ == '__main__':
     parser.add_argument('--human_num', type=int, default=None)
     parser.add_argument('--safety_space', type=float, default=0.2)
     parser.add_argument('--test_scenario', type=str, default=None)
+    parser.add_argument('--stats_file', type=str, default="test_stats.yaml")
     parser.add_argument('-d', '--planning_depth', type=int, default=None)
     parser.add_argument('-w', '--planning_width', type=int, default=None)
     parser.add_argument('--sparse_search', default=False, action='store_true')
